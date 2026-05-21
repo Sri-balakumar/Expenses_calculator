@@ -1,0 +1,29 @@
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Node / build (in case Capacitor is added later)
+node_modules/
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local env (if added later)
+.env
+.env.local
+.env.*.local
+
+# Capacitor (if added later)
+.capacitor/
+android/
+ios/

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yearly Summary — Expense Calculator</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#6366f1">
+  <link rel="apple-touch-icon" href="icons/icon.svg">
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+  <script src="js/theme.js"></script>
+</head>
+<body>
+  <div class="container">
+
+    <div class="header">
+      <div>
+        <a href="dashboard.html" class="back-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          Back
+        </a>
+        <h1 class="month-title" id="year-title">Year</h1>
+      </div>
+      <div id="header-actions"></div>
+    </div>
+
+    <div id="year-loading" class="card">
+      <p class="muted">Loading...</p>
+    </div>
+
+    <div id="year-content" class="hidden">
+
+      <div class="card" style="padding: 16px 22px; margin-bottom: 16px;">
+        <div class="year-nav" style="justify-content:center;">
+          <button id="year-prev" aria-label="Previous year">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <span class="year-label" id="year-label">2026</span>
+          <button id="year-next" aria-label="Next year">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="admin-stats-bar">
+        <div class="admin-stat-tile">
+          <div class="admin-stat-label">Total spend</div>
+          <div class="admin-stat-value" id="stat-total-spend">—</div>
+        </div>
+        <div class="admin-stat-tile">
+          <div class="admin-stat-label">Total income</div>
+          <div class="admin-stat-value" id="stat-total-income">—</div>
+        </div>
+        <div class="admin-stat-tile">
+          <div class="admin-stat-label">Avg / month</div>
+          <div class="admin-stat-value" id="stat-avg-month">—</div>
+        </div>
+        <div class="admin-stat-tile">
+          <div class="admin-stat-label">Yearly salary</div>
+          <div class="admin-stat-value" id="stat-yearly-salary">—</div>
+        </div>
+      </div>
+
+      <div class="card" style="padding: 18px 22px; margin-bottom: 16px;">
+        <h2 style="margin-top:0;">Monthly Spending</h2>
+        <div style="position:relative;height:240px;">
+          <canvas id="year-chart"></canvas>
+        </div>
+      </div>
+
+      <h2>All Months</h2>
+      <div id="year-grid"></div>
+    </div>
+
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <script src="js/firebase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/admin-config.js"></script>
+  <script src="js/year.js"></script>
+  <script src="js/pwa.js"></script>
+
+  <script>
+    mountThemeToggle(document.getElementById("header-actions"));
+    loadYear();
+  </script>
+</body>
+</html>

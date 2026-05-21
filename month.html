@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Month — Expense Calculator</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="apple-touch-icon" href="icons/icon.svg">
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+  <script src="js/theme.js"></script>
+</head>
+<body>
+  <div class="container">
+
+    <div class="header">
+      <div>
+        <a href="dashboard.html" class="back-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          Back
+        </a>
+        <h1 id="month-name" class="month-title">Loading...</h1>
+      </div>
+      <div id="header-actions"></div>
+    </div>
+
+    <div id="total-display" class="total-display under">
+      <div class="total-label" id="total-label">Remaining</div>
+      <div class="total-amount" id="total-amount">₹0</div>
+    </div>
+
+    <!-- Pie chart -->
+    <div class="card chart-card hidden" id="chart-card">
+      <h2>Spending by Category</h2>
+      <div class="chart-wrap">
+        <canvas id="category-chart"></canvas>
+      </div>
+    </div>
+
+    <!-- Weekly breakdown -->
+    <div class="card weekly-card hidden" id="weekly-card">
+      <h2>Weekly Breakdown</h2>
+      <div class="weekly-grid" id="weekly-grid"></div>
+    </div>
+
+    <!-- Category budgets progress -->
+    <div class="card weekly-card hidden" id="cat-budgets-card">
+      <h2>Category Budgets</h2>
+      <div id="cat-budgets-list"></div>
+    </div>
+
+    <!-- Add expense -->
+    <div class="card">
+      <h2 style="margin-top: 0;">Add Expense</h2>
+      <div class="add-expense-form">
+        <div class="form-group">
+          <label for="expense-name">Name</label>
+          <div class="input-wrap">
+            <input type="text" id="expense-name" placeholder="e.g. Groceries">
+            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="expense-amount">Amount (₹)</label>
+          <div class="input-wrap">
+            <input type="number" id="expense-amount" placeholder="e.g. 500" min="0">
+            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12"/><path d="M6 8h12"/><path d="M6 13l8.5 8"/><path d="M6 13h3a4.5 4.5 0 1 0 0-9"/></svg>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Category</label>
+          <div class="category-row" id="category-picker"></div>
+        </div>
+        <div class="form-group" id="payment-method-group">
+          <label>Payment method (for spends)</label>
+          <div class="category-row" id="payment-picker"></div>
+        </div>
+        <div class="form-group">
+          <label for="expense-notes">Notes <span class="muted" style="font-weight:400;font-size:0.8rem;">(optional)</span></label>
+          <textarea id="expense-notes" placeholder="e.g. Coffee with Raj at Cafe Coffee Day"></textarea>
+        </div>
+        <div class="add-buttons">
+          <button class="btn-minus" id="btn-minus" title="Subtract from total">−</button>
+          <button class="btn-plus" id="btn-plus" title="Add to total">+</button>
+        </div>
+        <p class="helper-text">
+          Tap <strong style="color: var(--danger);">−</strong> for a spend (reduces remaining).<br>
+          Tap <strong style="color: var(--success);">+</strong> for income (increases remaining).
+        </p>
+      </div>
+    </div>
+
+    <div class="download-row">
+      <button class="btn-secondary download-btn" id="btn-download-pdf" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>
+        PDF
+      </button>
+      <button class="btn-secondary download-btn" id="btn-download-excel" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="8" y1="9" x2="10" y2="9"/></svg>
+        Excel
+      </button>
+    </div>
+
+    <h2>Expenses</h2>
+
+    <div class="search-bar">
+      <div class="input-wrap" style="flex:1;">
+        <input type="text" id="search-input" placeholder="Search by name or notes...">
+        <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </div>
+      <div class="filter-chips">
+        <button class="filter-chip active" data-filter="all">All</button>
+        <button class="filter-chip" data-filter="minus">Spends</button>
+        <button class="filter-chip" data-filter="plus">Income</button>
+      </div>
+    </div>
+
+    <div class="card" style="padding: 8px 22px;">
+      <div id="expenses-list"></div>
+      <div id="empty-expenses" class="empty-state hidden">
+        <div class="empty-state-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </div>
+        <p>No expenses yet. Add one above.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- EDIT MODAL -->
+  <div class="modal-backdrop hidden" id="edit-modal">
+    <div class="modal-card">
+      <h3>Edit Expense</h3>
+      <div id="edit-error" class="status-msg error hidden"></div>
+      <div class="add-expense-form">
+        <div class="form-group">
+          <label for="edit-name">Name</label>
+          <input type="text" id="edit-name">
+        </div>
+        <div class="form-group">
+          <label for="edit-amount">Amount (₹)</label>
+          <input type="number" id="edit-amount" min="0">
+        </div>
+        <div class="form-group">
+          <label>Type</label>
+          <div class="type-segment">
+            <button type="button" class="type-seg-btn minus" id="edit-type-minus">− Spend</button>
+            <button type="button" class="type-seg-btn plus" id="edit-type-plus">+ Income</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Category</label>
+          <div class="category-row" id="edit-category-picker"></div>
+        </div>
+        <div class="form-group" id="edit-payment-method-group">
+          <label>Payment method</label>
+          <div class="category-row" id="edit-payment-picker"></div>
+        </div>
+        <div class="form-group">
+          <label for="edit-notes">Notes</label>
+          <textarea id="edit-notes" placeholder="Optional notes"></textarea>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="edit-cancel">Cancel</button>
+        <button class="btn-primary" id="edit-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DETAILS MODAL (tap an expense row to view) -->
+  <div class="modal-backdrop hidden" id="details-modal">
+    <div class="modal-card">
+      <h3 id="details-title">Expense details</h3>
+      <div id="details-content"></div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="details-close">Close</button>
+        <button class="btn-primary" id="details-edit">Edit</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+  <!-- PDF + Excel + Chart libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.1/dist/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <script src="js/firebase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/month.js"></script>
+  <script src="js/pwa.js"></script>
+  <script>
+    // theme.js is loaded in <head>; mountThemeToggle exposed there
+  </script>
+
+  <script>
+    document.getElementById("btn-plus").addEventListener("click", function () { addExpense("plus"); });
+    document.getElementById("btn-minus").addEventListener("click", function () { addExpense("minus"); });
+    document.getElementById("btn-download-pdf").addEventListener("click", downloadPDF);
+    document.getElementById("btn-download-excel").addEventListener("click", downloadExcel);
+    document.getElementById("edit-cancel").addEventListener("click", closeEditModal);
+    document.getElementById("edit-save").addEventListener("click", saveEdit);
+    document.getElementById("edit-type-minus").addEventListener("click", function () { setEditType("minus"); });
+    document.getElementById("edit-type-plus").addEventListener("click", function () { setEditType("plus"); });
+    document.getElementById("edit-modal").addEventListener("click", function (e) {
+      if (e.target.id === "edit-modal") closeEditModal();
+    });
+    document.getElementById("details-close").addEventListener("click", closeDetailsModal);
+    document.getElementById("details-edit").addEventListener("click", function () {
+      if (window.__detailsCurrent) {
+        const exp = window.__detailsCurrent;
+        closeDetailsModal();
+        openEditModal(exp);
+      }
+    });
+    document.getElementById("details-modal").addEventListener("click", function (e) {
+      if (e.target.id === "details-modal") closeDetailsModal();
+    });
+
+    document.getElementById("search-input").addEventListener("input", function (e) {
+      searchTerm = e.target.value.toLowerCase();
+      applyFilters();
+    });
+    document.querySelectorAll(".filter-chip").forEach(function (chip) {
+      chip.addEventListener("click", function () {
+        document.querySelectorAll(".filter-chip").forEach(function (c) { c.classList.remove("active"); });
+        chip.classList.add("active");
+        typeFilter = chip.dataset.filter;
+        applyFilters();
+      });
+    });
+
+    mountThemeToggle(document.getElementById("header-actions"));
+    loadMonth();
+  </script>
+</body>
+</html>

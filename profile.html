@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Profile — Expense Calculator</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#6366f1">
+  <link rel="apple-touch-icon" href="icons/icon.svg">
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+  <script src="js/theme.js"></script>
+</head>
+<body>
+  <div class="container">
+
+    <div class="header">
+      <div>
+        <a href="dashboard.html" class="back-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          Back
+        </a>
+        <h1 class="month-title">My Profile</h1>
+      </div>
+      <div id="header-actions"></div>
+    </div>
+
+    <div id="loading-card" class="card">
+      <p class="muted">Loading...</p>
+    </div>
+
+    <div id="profile-card" class="card hidden">
+      <h2 style="margin-top:0;">Personal Info</h2>
+      <form id="profile-form" class="auth-form">
+        <div class="form-group">
+          <label for="profile-name">Name</label>
+          <div class="input-wrap">
+            <input type="text" id="profile-name" required>
+            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="profile-salary">Monthly salary (₹)</label>
+          <div class="input-wrap">
+            <input type="number" id="profile-salary" min="0" required>
+            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12"/><path d="M6 8h12"/><path d="M6 13l8.5 8"/><path d="M6 13h3a4.5 4.5 0 1 0 0-9"/></svg>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-label">Email</div>
+          <div class="settings-value" id="profile-email">—</div>
+        </div>
+        <button type="submit" class="btn-primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          Save changes
+        </button>
+      </form>
+    </div>
+
+    <div id="password-card" class="card hidden">
+      <h2 style="margin-top:0;">Change Password</h2>
+      <form id="password-form" class="auth-form">
+        <div class="form-group">
+          <label for="current-password">Current password</label>
+          <div class="input-wrap">
+            <input type="password" id="current-password" required>
+            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="new-password">New password</label>
+          <div class="input-wrap">
+            <input type="password" id="new-password" placeholder="At least 6 characters" required>
+            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+        </div>
+        <button type="submit" class="btn-primary">Update password</button>
+      </form>
+    </div>
+
+    <div id="recurring-card" class="card hidden">
+      <h2 style="margin-top:0;">Recurring Expenses</h2>
+      <p class="muted" style="font-size:0.88rem;margin-bottom:14px;">
+        These auto-add to every new month (e.g. rent, subscriptions).
+      </p>
+      <div id="recurring-list"></div>
+      <button class="btn-secondary" id="add-recurring-btn" style="width:100%;margin-top:10px;">
+        + Add Recurring Expense
+      </button>
+    </div>
+
+    <div id="category-budgets-card" class="card hidden">
+      <h2 style="margin-top:0;">Category Budgets</h2>
+      <p class="muted" style="font-size:0.88rem;margin-bottom:14px;">
+        Set a monthly limit per category. You'll see a progress bar on the month page.
+      </p>
+      <div id="category-budgets-list"></div>
+    </div>
+
+    <div id="actions-card" class="card hidden">
+      <button class="btn-danger" id="signout-btn" style="width:100%;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Sign out
+      </button>
+    </div>
+
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <script src="js/firebase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/admin-config.js"></script>
+  <script src="js/pwa.js"></script>
+
+  <script>
+    const loadingCard = document.getElementById("loading-card");
+    let userId = null;
+
+    mountThemeToggle(document.getElementById("header-actions"));
+
+    (async function init() {
+      const user = await waitForAuth();
+      if (!user) return (window.location.href = "index.html");
+      if (isAdmin(user)) return (window.location.href = "settings.html");
+      userId = user.uid;
+
+      const doc = await db.collection("users").doc(userId).get();
+      if (!doc.exists) return (window.location.href = "index.html");
+      const data = doc.data();
+
+      document.getElementById("profile-name").value = data.name || "";
+      document.getElementById("profile-salary").value = data.salary || 0;
+      document.getElementById("profile-email").textContent = data.email || user.email;
+
+      loadingCard.classList.add("hidden");
+      document.getElementById("profile-card").classList.remove("hidden");
+      document.getElementById("password-card").classList.remove("hidden");
+      document.getElementById("recurring-card").classList.remove("hidden");
+      document.getElementById("category-budgets-card").classList.remove("hidden");
+      document.getElementById("actions-card").classList.remove("hidden");
+
+      await renderRecurringList();
+      await renderCategoryBudgets();
+    })();
+
+    const CATEGORIES_DEF = {
+      food: { label: "Food", emoji: "🍔" },
+      rent: { label: "Rent", emoji: "🏠" },
+      transport: { label: "Transport", emoji: "🚗" },
+      shopping: { label: "Shopping", emoji: "🛍️" },
+      bills: { label: "Bills", emoji: "📄" },
+      health: { label: "Health", emoji: "💊" },
+      entertainment: { label: "Fun", emoji: "🎬" },
+      other: { label: "Other", emoji: "📌" }
+    };
+
+    function escapeHtml(s) {
+      const d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML;
+    }
+
+    async function renderRecurringList() {
+      const listEl = document.getElementById("recurring-list");
+      listEl.innerHTML = "";
+      const snap = await db.collection("users").doc(userId).collection("recurring").orderBy("name").get();
+      if (snap.empty) {
+        listEl.innerHTML = '<p class="muted" style="text-align:center;padding:12px;">None yet.</p>';
+        return;
+      }
+      snap.forEach(function (d) {
+        const r = d.data();
+        const cat = CATEGORIES_DEF[r.category] || CATEGORIES_DEF.other;
+        const row = document.createElement("div");
+        row.className = "settings-row";
+        row.innerHTML =
+          '<div class="settings-label" style="display:flex;align-items:center;gap:8px;">' +
+            '<span>' + cat.emoji + '</span>' +
+            '<span>' + escapeHtml(r.name) + '</span>' +
+            '<span class="muted" style="font-size:0.78rem;">' + cat.label + '</span>' +
+          '</div>' +
+          '<div style="display:flex;align-items:center;gap:8px;">' +
+            '<span class="settings-value">' + formatMoney(Number(r.amount) || 0) + '</span>' +
+            '<button class="btn-icon-only" data-del="' + d.id + '" title="Delete">' +
+              '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>' +
+            '</button>' +
+          '</div>';
+        listEl.appendChild(row);
+      });
+      listEl.querySelectorAll("[data-del]").forEach(function (btn) {
+        btn.addEventListener("click", async function () {
+          const ok = await showConfirm({ title: "Delete recurring?", message: "It won't be auto-added to new months.", confirmText: "Delete" });
+          if (ok) {
+            await db.collection("users").doc(userId).collection("recurring").doc(btn.dataset.del).delete();
+            showToast("Recurring removed", "success");
+            renderRecurringList();
+          }
+        });
+      });
+    }
+
+    document.getElementById("add-recurring-btn").addEventListener("click", function () {
+      const backdrop = document.createElement("div");
+      backdrop.className = "modal-backdrop";
+      backdrop.innerHTML =
+        '<div class="modal-card">' +
+          '<h3>Add Recurring</h3>' +
+          '<div class="add-expense-form">' +
+            '<div class="form-group">' +
+              '<label>Name</label>' +
+              '<input type="text" id="rec-name" placeholder="e.g. Rent">' +
+            '</div>' +
+            '<div class="form-group">' +
+              '<label>Amount (₹)</label>' +
+              '<input type="number" id="rec-amount" placeholder="e.g. 15000" min="0">' +
+            '</div>' +
+            '<div class="form-group">' +
+              '<label>Category</label>' +
+              '<div class="category-row" id="rec-cat"></div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="modal-actions">' +
+            '<button class="btn-secondary" data-act="cancel">Cancel</button>' +
+            '<button class="btn-primary" data-act="ok">Add</button>' +
+          '</div>' +
+        '</div>';
+
+      let selectedCat = "other";
+      const catRow = backdrop.querySelector("#rec-cat");
+      Object.keys(CATEGORIES_DEF).forEach(function (key) {
+        const c = CATEGORIES_DEF[key];
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "category-chip" + (key === "other" ? " active" : "");
+        chip.dataset.key = key;
+        chip.innerHTML = '<span class="chip-emoji">' + c.emoji + '</span><span>' + c.label + '</span>';
+        chip.addEventListener("click", function () {
+          catRow.querySelectorAll(".category-chip").forEach(function (x) { x.classList.remove("active"); });
+          chip.classList.add("active");
+          selectedCat = key;
+        });
+        catRow.appendChild(chip);
+      });
+
+      function cleanup() { if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop); }
+      backdrop.querySelector('[data-act="cancel"]').addEventListener("click", cleanup);
+      backdrop.addEventListener("click", function (e) { if (e.target === backdrop) cleanup(); });
+      backdrop.querySelector('[data-act="ok"]').addEventListener("click", async function () {
+        const name = backdrop.querySelector("#rec-name").value.trim();
+        const amount = Number(backdrop.querySelector("#rec-amount").value);
+        if (!name) return showToast("Enter a name.", "error");
+        if (!amount || amount <= 0) return showToast("Enter a valid amount.", "error");
+        await db.collection("users").doc(userId).collection("recurring").add({
+          name: name, amount: amount, category: selectedCat,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        showToast("Recurring added", "success");
+        cleanup();
+        renderRecurringList();
+      });
+      document.body.appendChild(backdrop);
+      setTimeout(function () { backdrop.querySelector("#rec-name").focus(); }, 50);
+    });
+
+    async function renderCategoryBudgets() {
+      const listEl = document.getElementById("category-budgets-list");
+      listEl.innerHTML = "";
+      // Load existing budgets
+      const snap = await db.collection("users").doc(userId).collection("categoryBudgets").get();
+      const existing = {};
+      snap.forEach(function (d) { existing[d.id] = Number(d.data().limit) || 0; });
+
+      Object.keys(CATEGORIES_DEF).forEach(function (key) {
+        if (key === "salary") return; // skip incomes
+        const c = CATEGORIES_DEF[key];
+        const row = document.createElement("div");
+        row.className = "settings-row";
+        row.style.gap = "10px";
+        row.innerHTML =
+          '<div class="settings-label" style="display:flex;align-items:center;gap:8px;">' +
+            '<span>' + c.emoji + '</span><span>' + c.label + '</span>' +
+          '</div>' +
+          '<input type="number" min="0" placeholder="No limit" data-key="' + key + '" style="max-width:140px;text-align:right;" value="' + (existing[key] || "") + '">';
+        listEl.appendChild(row);
+      });
+
+      listEl.querySelectorAll("input[data-key]").forEach(function (input) {
+        let saveTimer = null;
+        input.addEventListener("input", function () {
+          if (saveTimer) clearTimeout(saveTimer);
+          saveTimer = setTimeout(async function () {
+            const key = input.dataset.key;
+            const val = Number(input.value);
+            const ref = db.collection("users").doc(userId).collection("categoryBudgets").doc(key);
+            if (!val || val <= 0) {
+              await ref.delete().catch(function () {});
+            } else {
+              await ref.set({ limit: val });
+            }
+            showToast("Saved", "success", 1200);
+          }, 700);
+        });
+      });
+    }
+
+    document.getElementById("profile-form").addEventListener("submit", async function (e) {
+      e.preventDefault();
+      const name = document.getElementById("profile-name").value.trim();
+      const salary = Number(document.getElementById("profile-salary").value);
+      if (!name) return showToast("Name cannot be empty.", "error");
+      if (!salary || salary < 0) return showToast("Enter a valid salary.", "error");
+      try {
+        await updateProfile(userId, { name: name, salary: salary });
+        showToast("Profile updated!", "success");
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+    });
+
+    document.getElementById("password-form").addEventListener("submit", async function (e) {
+      e.preventDefault();
+      const current = document.getElementById("current-password").value;
+      const next = document.getElementById("new-password").value;
+      if (!next || next.length < 6) return showToast("New password must be at least 6 characters.", "error");
+      try {
+        await changePassword(current, next);
+        document.getElementById("current-password").value = "";
+        document.getElementById("new-password").value = "";
+        showToast("Password updated!", "success");
+      } catch (err) {
+        showToast(friendlyAuthError(err), "error");
+      }
+    });
+
+    document.getElementById("signout-btn").addEventListener("click", async function () {
+      const ok = await showConfirm({
+        title: "Sign out?",
+        message: "You'll need to log back in to continue.",
+        confirmText: "Sign out",
+        danger: false
+      });
+      if (ok) signOutUser();
+    });
+  </script>
+</body>
+</html>

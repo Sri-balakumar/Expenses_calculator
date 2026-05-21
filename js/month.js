@@ -1,0 +1,825 @@
+// Month page: categories, edit, weekly breakdown, pie chart, +/- buttons, exports.
+
+const CATEGORIES = {
+  food:          { label: "Food",       emoji: "🍔", color: "#f59e0b" },
+  rent:          { label: "Rent",       emoji: "🏠", color: "#8b5cf6" },
+  transport:     { label: "Transport",  emoji: "🚗", color: "#3b82f6" },
+  shopping:      { label: "Shopping",   emoji: "🛍️", color: "#ec4899" },
+  bills:         { label: "Bills",      emoji: "📄", color: "#06b6d4" },
+  health:        { label: "Health",     emoji: "💊", color: "#10b981" },
+  entertainment: { label: "Fun",        emoji: "🎬", color: "#f97316" },
+  salary:        { label: "Salary",     emoji: "💰", color: "#22c55e" },
+  other:         { label: "Other",      emoji: "📌", color: "#6b7280" }
+};
+const CATEGORY_KEYS = Object.keys(CATEGORIES);
+const DEFAULT_CATEGORY = "other";
+
+const PAYMENT_METHODS = {
+  gpay:    { label: "GPay",     emoji: "📱" },
+  phonepe: { label: "PhonePe",  emoji: "💜" },
+  paytm:   { label: "Paytm",    emoji: "🅿️" },
+  cash:    { label: "Cash",     emoji: "💵" },
+  card:    { label: "Card",     emoji: "💳" },
+  other:   { label: "Other",    emoji: "❓" }
+};
+const PAYMENT_KEYS = Object.keys(PAYMENT_METHODS);
+const DEFAULT_PAYMENT = "cash";
+
+let searchTerm = "";
+let typeFilter = "all";
+let selectedPayment = DEFAULT_PAYMENT;
+
+let userId = null;
+let userName = "";
+let userSalary = 0;       // for type=month, this is the user's salary; for type=budget, this is the budget amount
+let monthId = null;
+let monthName = "";
+let trackerType = "month"; // "month" or "budget"
+let expensesRef = null;
+let currentExpenses = []; // newest first
+let knownExpenseIds = new Set();
+
+// State for forms
+let selectedCategory = DEFAULT_CATEGORY;
+let editing = null; // { id, type, category }
+let categoryChart = null;
+
+const TRASH_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+  '<polyline points="3 6 5 6 21 6"/>' +
+  '<path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/>' +
+  '<path d="M10 11v6"/><path d="M14 11v6"/>' +
+  '<path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>';
+
+const EDIT_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>' +
+  '<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+
+const PLUS_MINI =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+
+const MINUS_MINI =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+
+function getParamsFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  return { id: params.get("id"), type: params.get("type") || "month" };
+}
+
+async function loadMonth() {
+  const params = getParamsFromUrl();
+  monthId = params.id;
+  trackerType = params.type;
+  if (!monthId) return (window.location.href = "dashboard.html");
+
+  const user = await waitForAuth();
+  if (!user) return (window.location.href = "index.html");
+  userId = user.uid;
+
+  const userDoc = await db.collection("users").doc(userId).get();
+  userName = (userDoc.data() && userDoc.data().name) || "";
+
+  const collectionName = trackerType === "budget" ? "budgets" : "months";
+  const itemDoc = await db.collection("users").doc(userId)
+    .collection(collectionName).doc(monthId).get();
+
+  if (!itemDoc.exists) {
+    showToast((trackerType === "budget" ? "Budget" : "Month") + " not found.", "error");
+    setTimeout(function () { window.location.href = "dashboard.html"; }, 800);
+    return;
+  }
+
+  const data = itemDoc.data();
+  monthName = data.name;
+  // For monthly: limit = user salary. For budgets: limit = budget amount.
+  userSalary = trackerType === "budget"
+    ? Number(data.amount) || 0
+    : Number(userDoc.data().salary) || 0;
+
+  document.getElementById("month-name").textContent = monthName;
+
+  // Hide weekly breakdown for budgets (only relevant for months)
+  if (trackerType === "budget") {
+    document.getElementById("weekly-card").classList.add("hidden");
+    document.getElementById("weekly-card").style.display = "none";
+  }
+
+  // Build the category picker (for the add-expense form)
+  buildCategoryPicker("category-picker", function (key) { selectedCategory = key; });
+  setActiveChip("category-picker", DEFAULT_CATEGORY);
+
+  // Build the category picker (for the edit modal)
+  buildCategoryPicker("edit-category-picker", function (key) {
+    if (editing) editing.category = key;
+  });
+
+  // Build payment method pickers
+  buildPaymentPicker("payment-picker", function (key) { selectedPayment = key; });
+  setActiveChip("payment-picker", DEFAULT_PAYMENT);
+  buildPaymentPicker("edit-payment-picker", function (key) {
+    if (editing) editing.paymentMethod = key;
+  });
+
+  expensesRef = itemDoc.ref.collection("expenses");
+  expensesRef.orderBy("createdAt", "desc").onSnapshot(function (snap) {
+    renderExpenses(snap);
+  });
+}
+
+// ============================================================
+// Category picker
+// ============================================================
+
+function buildCategoryPicker(elementId, onPick) {
+  const el = document.getElementById(elementId);
+  el.innerHTML = "";
+  CATEGORY_KEYS.forEach(function (key) {
+    const cat = CATEGORIES[key];
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "category-chip";
+    chip.dataset.key = key;
+    chip.innerHTML = '<span class="chip-emoji">' + cat.emoji + '</span><span>' + cat.label + '</span>';
+    chip.addEventListener("click", function () {
+      setActiveChip(elementId, key);
+      onPick(key);
+    });
+    el.appendChild(chip);
+  });
+}
+
+function setActiveChip(elementId, key) {
+  const el = document.getElementById(elementId);
+  el.querySelectorAll(".category-chip").forEach(function (c) {
+    c.classList.toggle("active", c.dataset.key === key);
+  });
+}
+
+function buildPaymentPicker(elementId, onPick) {
+  const el = document.getElementById(elementId);
+  el.innerHTML = "";
+  PAYMENT_KEYS.forEach(function (key) {
+    const pm = PAYMENT_METHODS[key];
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "category-chip";
+    chip.dataset.key = key;
+    chip.innerHTML = '<span class="chip-emoji">' + pm.emoji + '</span><span>' + pm.label + '</span>';
+    chip.addEventListener("click", function () {
+      setActiveChip(elementId, key);
+      onPick(key);
+    });
+    el.appendChild(chip);
+  });
+}
+
+// ============================================================
+// Render expense list, weekly summary, pie chart
+// ============================================================
+
+function renderExpenses(snap) {
+  const listEl = document.getElementById("expenses-list");
+  const emptyEl = document.getElementById("empty-expenses");
+  listEl.innerHTML = "";
+  currentExpenses = [];
+
+  let spent = 0;
+  const seenIds = new Set();
+  const sorted = []; // chronological for week grouping (oldest first)
+
+  snap.forEach(function (expDoc) {
+    const exp = expDoc.data();
+    const amt = Number(exp.amount) || 0;
+    const category = exp.category || DEFAULT_CATEGORY;
+    spent += exp.type === "plus" ? -amt : amt;
+
+    const obj = {
+      id: expDoc.id,
+      name: exp.name,
+      amount: amt,
+      type: exp.type,
+      category: category,
+      paymentMethod: exp.paymentMethod || null,
+      notes: exp.notes || "",
+      createdAt: exp.createdAt && exp.createdAt.toDate ? exp.createdAt.toDate() : null
+    };
+    currentExpenses.push(obj);
+    sorted.push(obj);
+    seenIds.add(expDoc.id);
+  });
+
+  // sorted is already newest-first; flip for week order
+  sorted.reverse();
+
+  if (currentExpenses.length === 0) {
+    emptyEl.classList.remove("hidden");
+    document.getElementById("weekly-card").classList.add("hidden");
+    document.getElementById("chart-card").classList.add("hidden");
+    setDownloadEnabled(false);
+  } else {
+    emptyEl.classList.add("hidden");
+    renderWeeklyBreakdown(currentExpenses);
+    renderPieChart(currentExpenses);
+    renderCategoryBudgets(currentExpenses);
+    applyFilters();
+    setDownloadEnabled(true);
+  }
+
+  knownExpenseIds = seenIds;
+  updateTotal(spent);
+}
+
+function applyFilters() {
+  const listEl = document.getElementById("expenses-list");
+  const emptyEl = document.getElementById("empty-expenses");
+  if (!listEl) return;
+  listEl.innerHTML = "";
+
+  const filtered = currentExpenses.filter(function (e) {
+    if (typeFilter !== "all" && e.type !== typeFilter) return false;
+    if (searchTerm) {
+      const haystack = (e.name + " " + (e.notes || "")).toLowerCase();
+      if (haystack.indexOf(searchTerm) === -1) return false;
+    }
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    if (currentExpenses.length === 0) {
+      emptyEl.classList.remove("hidden");
+      emptyEl.querySelector("p").innerHTML = "No expenses yet. Add one above.";
+    } else {
+      emptyEl.classList.remove("hidden");
+      emptyEl.querySelector("p").innerHTML = "No matches. Try a different search or filter.";
+    }
+    return;
+  }
+  emptyEl.classList.add("hidden");
+
+  if (trackerType === "budget" || typeFilter !== "all" || searchTerm) {
+    // Skip week grouping for budgets or when filtered
+    filtered.forEach(function (exp) { listEl.appendChild(buildRow(exp)); });
+  } else {
+    renderRowsByWeek(listEl, filtered);
+  }
+}
+
+function renderRowsByWeek(listEl, expenses) {
+  // Group by week-of-month using createdAt
+  const groups = {}; // weekNumber -> [expenses]
+  const order = [];
+  expenses.forEach(function (e) {
+    const wk = weekOfMonth(e.createdAt);
+    if (!groups[wk]) {
+      groups[wk] = [];
+      order.push(wk);
+    }
+    groups[wk].push(e);
+  });
+
+  order.forEach(function (wk) {
+    const divider = document.createElement("div");
+    divider.className = "week-divider";
+    divider.textContent = "Week " + wk;
+    listEl.appendChild(divider);
+    groups[wk].forEach(function (exp) {
+      listEl.appendChild(buildRow(exp));
+    });
+  });
+}
+
+function buildRow(exp) {
+  const row = document.createElement("div");
+  row.className = "expense-row";
+  if (!knownExpenseIds.has(exp.id) && knownExpenseIds.size > 0) {
+    row.classList.add("slide-down");
+  }
+
+  const cat = CATEGORIES[exp.category] || CATEGORIES.other;
+  const iconClass = exp.type === "plus" ? "plus" : "minus";
+  const iconSvg = exp.type === "plus" ? PLUS_MINI : MINUS_MINI;
+  const sign = exp.type === "plus" ? "+" : "−";
+
+  const badgeStyle =
+    "background:" + hexToRgba(cat.color, 0.15) + ";color:" + cat.color + ";";
+
+  const pmBadge = (exp.type === "minus" && exp.paymentMethod && PAYMENT_METHODS[exp.paymentMethod])
+    ? '<span class="category-badge" style="background:var(--chip-bg);color:var(--text-muted);">' +
+        PAYMENT_METHODS[exp.paymentMethod].emoji + ' ' + PAYMENT_METHODS[exp.paymentMethod].label +
+      '</span>'
+    : '';
+
+  const notesHint = exp.notes
+    ? '<div class="muted" style="font-size:0.78rem;margin-top:2px;">📝 ' + escapeHtml(exp.notes.slice(0, 60)) + (exp.notes.length > 60 ? '…' : '') + '</div>'
+    : '';
+
+  row.innerHTML =
+    '<div class="expense-info">' +
+      '<div class="expense-name">' +
+        '<span class="expense-name-icon ' + iconClass + '">' + iconSvg + '</span>' +
+        escapeHtml(exp.name) +
+        '<span class="category-badge" style="' + badgeStyle + '">' + cat.emoji + ' ' + cat.label + '</span>' +
+        pmBadge +
+      '</div>' +
+      '<div class="expense-amount ' + iconClass + '">' +
+        sign + ' ' + formatMoney(exp.amount) +
+      '</div>' +
+      notesHint +
+    '</div>';
+
+  // Tap whole row to open details
+  row.addEventListener("click", function (e) {
+    // Ignore clicks on action buttons
+    if (e.target.closest(".row-actions")) return;
+    openDetailsModal(exp);
+  });
+
+  const actions = document.createElement("div");
+  actions.className = "row-actions";
+
+  const editBtn = document.createElement("button");
+  editBtn.className = "btn-icon-only edit-btn";
+  editBtn.title = "Edit";
+  editBtn.innerHTML = EDIT_SVG;
+  editBtn.addEventListener("click", function (e) { e.stopPropagation(); openEditModal(exp); });
+  actions.appendChild(editBtn);
+
+  const delBtn = document.createElement("button");
+  delBtn.className = "btn-icon-only";
+  delBtn.title = "Delete";
+  delBtn.innerHTML = TRASH_SVG;
+  delBtn.addEventListener("click", async function (e) {
+    e.stopPropagation();
+    const ok = await showConfirm({
+      title: "Delete this expense?",
+      message: '"' + exp.name + '" — ' + formatMoney(exp.amount),
+      confirmText: "Delete"
+    });
+    if (ok) {
+      await expensesRef.doc(exp.id).delete();
+      showToast("Expense deleted", "success");
+    }
+  });
+  actions.appendChild(delBtn);
+
+  row.appendChild(actions);
+  return row;
+}
+
+// Details modal
+function openDetailsModal(exp) {
+  window.__detailsCurrent = exp;
+  const cat = CATEGORIES[exp.category] || CATEGORIES.other;
+  const pm = exp.paymentMethod ? PAYMENT_METHODS[exp.paymentMethod] : null;
+  const dateStr = exp.createdAt
+    ? exp.createdAt.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+    : "—";
+
+  const rows = [
+    ["Type", exp.type === "plus" ? "+ Income" : "− Spend"],
+    ["Amount", formatMoney(exp.amount)],
+    ["Category", cat.emoji + " " + cat.label],
+  ];
+  if (exp.type === "minus" && pm) rows.push(["Payment method", pm.emoji + " " + pm.label]);
+  if (trackerType !== "budget" && exp.createdAt) rows.push(["Week", "Week " + weekOfMonth(exp.createdAt)]);
+  rows.push(["Date", dateStr]);
+  if (exp.notes) rows.push(["Notes", exp.notes]);
+
+  document.getElementById("details-title").textContent = exp.name;
+  const content = document.getElementById("details-content");
+  content.innerHTML = rows.map(function (r) {
+    return '<div class="details-row">' +
+      '<div class="details-label">' + escapeHtml(r[0]) + '</div>' +
+      '<div class="details-value">' + escapeHtml(r[1]) + '</div>' +
+    '</div>';
+  }).join("");
+
+  document.getElementById("details-modal").classList.remove("hidden");
+}
+
+function closeDetailsModal() {
+  document.getElementById("details-modal").classList.add("hidden");
+  window.__detailsCurrent = null;
+}
+
+function weekOfMonth(date) {
+  if (!date) return 1;
+  const day = date.getDate();
+  return Math.min(5, Math.floor((day - 1) / 7) + 1);
+}
+
+function renderWeeklyBreakdown(expenses) {
+  const card = document.getElementById("weekly-card");
+  if (trackerType === "budget") {
+    card.classList.add("hidden");
+    return;
+  }
+  const grid = document.getElementById("weekly-grid");
+  grid.innerHTML = "";
+
+  // Sum spend (minus type) per week; ignore income
+  const totals = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  expenses.forEach(function (e) {
+    if (e.type === "minus") {
+      totals[weekOfMonth(e.createdAt)] += e.amount;
+    }
+  });
+
+  let any = false;
+  for (let w = 1; w <= 5; w++) {
+    if (totals[w] === 0 && w === 5) continue; // hide empty week 5
+    any = true;
+    const tile = document.createElement("div");
+    tile.className = "week-tile";
+    const range = weekRange(w);
+    tile.innerHTML =
+      '<div class="week-tile-label">Week ' + w + '</div>' +
+      '<div class="week-tile-amount">' + formatMoney(totals[w]) + '</div>' +
+      '<div class="week-tile-range">Days ' + range + '</div>';
+    grid.appendChild(tile);
+  }
+
+  if (any) card.classList.remove("hidden");
+  else card.classList.add("hidden");
+}
+
+function weekRange(w) {
+  const start = (w - 1) * 7 + 1;
+  const end = w === 5 ? 31 : start + 6;
+  return start + "–" + end;
+}
+
+async function renderCategoryBudgets(expenses) {
+  const card = document.getElementById("cat-budgets-card");
+  const listEl = document.getElementById("cat-budgets-list");
+  if (!card || trackerType === "budget") {
+    if (card) card.classList.add("hidden");
+    return;
+  }
+
+  const budgetsSnap = await db.collection("users").doc(userId)
+    .collection("categoryBudgets").get();
+  if (budgetsSnap.empty) { card.classList.add("hidden"); return; }
+
+  // Aggregate spending by category
+  const spentBy = {};
+  expenses.forEach(function (e) {
+    if (e.type !== "minus") return;
+    const c = e.category || DEFAULT_CATEGORY;
+    spentBy[c] = (spentBy[c] || 0) + e.amount;
+  });
+
+  listEl.innerHTML = "";
+  budgetsSnap.forEach(function (budgetDoc) {
+    const limit = Number(budgetDoc.data().limit) || 0;
+    if (limit <= 0) return;
+    const key = budgetDoc.id;
+    const spent = spentBy[key] || 0;
+    const pct = Math.min(100, Math.max(0, (spent / limit) * 100));
+    const fillClass = spent > limit ? "over" : (pct > 80 ? "warn" : "");
+    const cat = CATEGORIES[key] || CATEGORIES.other;
+
+    const row = document.createElement("div");
+    row.style.padding = "10px 0";
+    row.innerHTML =
+      '<div style="display:flex;justify-content:space-between;font-size:0.92rem;font-weight:600;margin-bottom:6px;">' +
+        '<span>' + cat.emoji + ' ' + cat.label + '</span>' +
+        '<span class="muted">' + formatMoney(spent) + ' / ' + formatMoney(limit) + '</span>' +
+      '</div>' +
+      '<div class="budget-progress-bar">' +
+        '<div class="budget-progress-fill ' + fillClass + '" style="width:' + pct.toFixed(1) + '%;"></div>' +
+      '</div>';
+    listEl.appendChild(row);
+  });
+
+  if (listEl.children.length > 0) {
+    card.classList.remove("hidden");
+  } else {
+    card.classList.add("hidden");
+  }
+}
+
+function renderPieChart(expenses) {
+  const card = document.getElementById("chart-card");
+
+  // Aggregate spend (minus) by category
+  const sums = {};
+  expenses.forEach(function (e) {
+    if (e.type !== "minus") return;
+    const c = e.category || DEFAULT_CATEGORY;
+    sums[c] = (sums[c] || 0) + e.amount;
+  });
+
+  const keys = Object.keys(sums);
+  if (keys.length === 0 || !window.Chart) {
+    card.classList.add("hidden");
+    if (categoryChart) { categoryChart.destroy(); categoryChart = null; }
+    return;
+  }
+  card.classList.remove("hidden");
+
+  const labels = keys.map(function (k) { return CATEGORIES[k] ? CATEGORIES[k].label : k; });
+  const data = keys.map(function (k) { return sums[k]; });
+  const colors = keys.map(function (k) { return CATEGORIES[k] ? CATEGORIES[k].color : "#9ca3af"; });
+
+  const ctx = document.getElementById("category-chart").getContext("2d");
+  if (categoryChart) categoryChart.destroy();
+  categoryChart = new Chart(ctx, {
+    type: "doughnut",
+    data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 2, borderColor: "#fff" }] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "bottom", labels: { boxWidth: 14, font: { size: 12 } } },
+        tooltip: {
+          callbacks: {
+            label: function (ctx) { return ctx.label + ": " + formatMoney(ctx.parsed); }
+          }
+        }
+      },
+      cutout: "60%"
+    }
+  });
+}
+
+function updateTotal(spent) {
+  const remaining = userSalary - spent;
+  const totalEl = document.getElementById("total-display");
+  const amountEl = document.getElementById("total-amount");
+  const labelEl = document.getElementById("total-label");
+
+  labelEl.textContent = remaining >= 0 ? "Remaining" : "Over budget by";
+  animateCount(amountEl, Math.abs(remaining), formatMoney);
+
+  totalEl.classList.remove("under", "over");
+  totalEl.classList.add(remaining >= 0 ? "under" : "over");
+}
+
+function setDownloadEnabled(enabled) {
+  document.getElementById("btn-download-pdf").disabled = !enabled;
+  document.getElementById("btn-download-excel").disabled = !enabled;
+}
+
+// ============================================================
+// Add expense
+// ============================================================
+
+async function addExpense(type) {
+  const nameInput = document.getElementById("expense-name");
+  const amountInput = document.getElementById("expense-amount");
+  const notesInput = document.getElementById("expense-notes");
+
+  const name = nameInput.value.trim();
+  const amount = Number(amountInput.value);
+  const notes = notesInput.value.trim();
+
+  if (!name) return showToast("Enter an expense name.", "error");
+  if (!amount || amount <= 0) return showToast("Enter a valid amount.", "error");
+
+  const payload = {
+    name: name,
+    amount: amount,
+    type: type,
+    category: selectedCategory,
+    notes: notes,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  if (type === "minus") payload.paymentMethod = selectedPayment;
+
+  await expensesRef.add(payload);
+
+  showToast(
+    (type === "plus" ? "Income" : "Expense") + " added: " + name,
+    "success"
+  );
+
+  nameInput.value = "";
+  amountInput.value = "";
+  notesInput.value = "";
+  selectedCategory = DEFAULT_CATEGORY;
+  setActiveChip("category-picker", DEFAULT_CATEGORY);
+  selectedPayment = DEFAULT_PAYMENT;
+  setActiveChip("payment-picker", DEFAULT_PAYMENT);
+  nameInput.focus();
+}
+
+// ============================================================
+// Edit modal
+// ============================================================
+
+function openEditModal(exp) {
+  editing = {
+    id: exp.id,
+    type: exp.type,
+    category: exp.category || DEFAULT_CATEGORY,
+    paymentMethod: exp.paymentMethod || DEFAULT_PAYMENT
+  };
+  document.getElementById("edit-name").value = exp.name;
+  document.getElementById("edit-amount").value = exp.amount;
+  document.getElementById("edit-notes").value = exp.notes || "";
+  document.getElementById("edit-error").className = "status-msg error hidden";
+  setEditType(exp.type);
+  setActiveChip("edit-category-picker", editing.category);
+  setActiveChip("edit-payment-picker", editing.paymentMethod);
+  document.getElementById("edit-modal").classList.remove("hidden");
+}
+
+function closeEditModal() {
+  document.getElementById("edit-modal").classList.add("hidden");
+  editing = null;
+}
+
+function setEditType(type) {
+  if (!editing) editing = { type: type, category: DEFAULT_CATEGORY, paymentMethod: DEFAULT_PAYMENT };
+  else editing.type = type;
+  const minusBtn = document.getElementById("edit-type-minus");
+  const plusBtn = document.getElementById("edit-type-plus");
+  minusBtn.classList.toggle("active", type === "minus");
+  plusBtn.classList.toggle("active", type === "plus");
+
+  // Hide payment method when type=plus
+  const pmGroup = document.getElementById("edit-payment-method-group");
+  if (pmGroup) pmGroup.style.display = type === "plus" ? "none" : "";
+}
+
+async function saveEdit() {
+  if (!editing) return;
+  const name = document.getElementById("edit-name").value.trim();
+  const amount = Number(document.getElementById("edit-amount").value);
+  const errEl = document.getElementById("edit-error");
+
+  if (!name) {
+    errEl.textContent = "Please enter a name.";
+    errEl.className = "status-msg error";
+    return;
+  }
+  if (!amount || amount <= 0) {
+    errEl.textContent = "Please enter a valid amount.";
+    errEl.className = "status-msg error";
+    return;
+  }
+
+  const notes = document.getElementById("edit-notes").value.trim();
+
+  const update = {
+    name: name,
+    amount: amount,
+    type: editing.type,
+    category: editing.category,
+    notes: notes
+  };
+  if (editing.type === "minus") update.paymentMethod = editing.paymentMethod || DEFAULT_PAYMENT;
+  else update.paymentMethod = firebase.firestore.FieldValue.delete();
+
+  await expensesRef.doc(editing.id).update(update);
+  showToast("Expense updated", "success");
+  closeEditModal();
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str || "";
+  return div.innerHTML;
+}
+
+function hexToRgba(hex, alpha) {
+  const m = hex.replace("#", "");
+  const r = parseInt(m.substring(0, 2), 16);
+  const g = parseInt(m.substring(2, 4), 16);
+  const b = parseInt(m.substring(4, 6), 16);
+  return "rgba(" + r + "," + g + "," + b + "," + alpha + ")";
+}
+
+// ============================================================
+// PDF + Excel export (now with category column)
+// ============================================================
+
+function buildExportRows() {
+  let totalSpent = 0;
+  let totalIncome = 0;
+  const rows = currentExpenses.map(function (e) {
+    if (e.type === "plus") totalIncome += e.amount;
+    else totalSpent += e.amount;
+    const cat = CATEGORIES[e.category] || CATEGORIES.other;
+    const pm = e.paymentMethod && PAYMENT_METHODS[e.paymentMethod] ? PAYMENT_METHODS[e.paymentMethod].label : "";
+    return {
+      Name: e.name,
+      Category: cat.label,
+      Type: e.type === "plus" ? "Income (+)" : "Spend (-)",
+      Payment: e.type === "minus" ? pm : "",
+      Notes: e.notes || "",
+      Amount: e.amount,
+      Week: e.createdAt ? "Week " + weekOfMonth(e.createdAt) : ""
+    };
+  });
+  return {
+    rows: rows,
+    totalSpent: totalSpent,
+    totalIncome: totalIncome,
+    remaining: userSalary - (totalSpent - totalIncome)
+  };
+}
+
+function downloadPDF() {
+  if (currentExpenses.length === 0) {
+    showToast("Add at least one expense before downloading.", "error");
+    return;
+  }
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    showToast("PDF library failed to load. Check your internet and reload.", "error");
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+
+  const data = buildExportRows();
+
+  const limitLabel = trackerType === "budget" ? "Budget Amount" : "Salary";
+  const reportTitle = (trackerType === "budget" ? "Budget Report - " : "Expense Report - ") + monthName;
+
+  doc.setFontSize(18);
+  doc.text(reportTitle, 14, 18);
+
+  doc.setFontSize(11);
+  doc.setTextColor(100);
+  doc.text("Name: " + userName, 14, 28);
+  doc.text(limitLabel + ": Rs. " + userSalary.toLocaleString("en-IN"), 14, 34);
+  doc.text("Total Spend: Rs. " + data.totalSpent.toLocaleString("en-IN"), 14, 40);
+  doc.text("Total Income: Rs. " + data.totalIncome.toLocaleString("en-IN"), 14, 46);
+  doc.text("Remaining: Rs. " + data.remaining.toLocaleString("en-IN"), 14, 52);
+
+  const headRow = trackerType === "budget"
+    ? [["#", "Name", "Category", "Type", "Payment", "Notes", "Amount (Rs.)"]]
+    : [["#", "Week", "Name", "Category", "Type", "Payment", "Notes", "Amount (Rs.)"]];
+  const bodyRows = data.rows.map(function (r, i) {
+    return trackerType === "budget"
+      ? [i + 1, r.Name, r.Category, r.Type, r.Payment, r.Notes, r.Amount.toLocaleString("en-IN")]
+      : [i + 1, r.Week, r.Name, r.Category, r.Type, r.Payment, r.Notes, r.Amount.toLocaleString("en-IN")];
+  });
+
+  doc.autoTable({
+    startY: 60,
+    head: headRow,
+    body: bodyRows,
+    styles: { fontSize: 10 },
+    headStyles: { fillColor: [99, 102, 241] }
+  });
+
+  doc.save(safeFilename(monthName) + ".pdf");
+  showToast("PDF downloaded", "success");
+}
+
+function downloadExcel() {
+  if (currentExpenses.length === 0) {
+    showToast("Add at least one expense before downloading.", "error");
+    return;
+  }
+  if (!window.XLSX) {
+    showToast("Excel library failed to load. Check your internet and reload.", "error");
+    return;
+  }
+
+  const data = buildExportRows();
+
+  const limitLabel = trackerType === "budget" ? "Budget Amount (₹)" : "Salary (₹)";
+  const reportTitle = (trackerType === "budget" ? "Budget Report — " : "Expense Report — ") + monthName;
+
+  const headerRows = [
+    [reportTitle],
+    ["Name", userName],
+    [limitLabel, userSalary],
+    ["Total Spend (₹)", data.totalSpent],
+    ["Total Income (₹)", data.totalIncome],
+    ["Remaining (₹)", data.remaining],
+    [],
+    trackerType === "budget"
+      ? ["#", "Name", "Category", "Type", "Payment", "Notes", "Amount (₹)"]
+      : ["#", "Week", "Name", "Category", "Type", "Payment", "Notes", "Amount (₹)"]
+  ];
+  const bodyRows = data.rows.map(function (r, i) {
+    return trackerType === "budget"
+      ? [i + 1, r.Name, r.Category, r.Type, r.Payment, r.Notes, r.Amount]
+      : [i + 1, r.Week, r.Name, r.Category, r.Type, r.Payment, r.Notes, r.Amount];
+  });
+  const all = headerRows.concat(bodyRows);
+
+  const ws = XLSX.utils.aoa_to_sheet(all);
+  ws["!cols"] = trackerType === "budget"
+    ? [{ wch: 6 }, { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 14 }]
+    : [{ wch: 6 }, { wch: 10 }, { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 14 }];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Expenses");
+  XLSX.writeFile(wb, safeFilename(monthName) + ".xlsx");
+  showToast("Excel downloaded", "success");
+}
+
+function safeFilename(name) {
+  return (name || "month").replace(/[^a-z0-9_\- ]/gi, "_").trim() || "month";
+}
