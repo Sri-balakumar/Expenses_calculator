@@ -1,12 +1,13 @@
 // Service worker — caches the app shell so it loads instantly + works offline.
 
-const CACHE_NAME = "expense-calc-v1";
+const CACHE_NAME = "expense-calc-v3";
 
 const APP_SHELL = [
   "./",
   "./index.html",
   "./dashboard.html",
   "./month.html",
+  "./year.html",
   "./profile.html",
   "./admin-login.html",
   "./admin.html",
@@ -17,9 +18,11 @@ const APP_SHELL = [
   "./js/firebase.js",
   "./js/auth.js",
   "./js/ui.js",
+  "./js/theme.js",
   "./js/admin-config.js",
   "./js/dashboard.js",
   "./js/month.js",
+  "./js/year.js",
   "./js/admin.js",
   "./js/pwa.js"
 ];
