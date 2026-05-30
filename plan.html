@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plan — Expense Calculator</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="apple-touch-icon" href="icons/icon.svg">
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+  <script src="js/theme.js"></script>
+</head>
+<body>
+  <div class="container">
+
+    <div class="header">
+      <div>
+        <a href="dashboard.html" class="back-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          Back
+        </a>
+        <h1 id="plan-name" class="month-title">Loading...</h1>
+      </div>
+      <div id="header-actions"></div>
+    </div>
+
+    <div id="loading-card" class="card">
+      <p class="muted">Loading...</p>
+    </div>
+
+    <!-- Start balance + summary -->
+    <div id="plan-summary-card" class="card hidden" style="padding: 18px 22px;">
+      <div class="plan-summary">
+        <div class="plan-summary-cell">
+          <div class="plan-summary-label">Starting balance</div>
+          <div class="plan-summary-value" id="sum-start">—</div>
+        </div>
+        <div class="plan-summary-cell">
+          <div class="plan-summary-label">Remaining</div>
+          <div class="plan-summary-value" id="sum-remaining">—</div>
+        </div>
+        <div class="plan-summary-cell">
+          <div class="plan-summary-label">Difference</div>
+          <div class="plan-summary-value" id="sum-diff">—</div>
+        </div>
+      </div>
+      <button class="btn-secondary" id="edit-start-btn" style="width:100%;margin-top:14px;">
+        Edit starting balance
+      </button>
+    </div>
+
+    <!-- Ledger -->
+    <div id="plan-body" class="card hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;">
+        <h2 style="margin:0;">Planned items</h2>
+        <button class="btn-primary" id="add-item-btn" style="padding:9px 14px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add item
+        </button>
+      </div>
+      <div id="plan-items"></div>
+      <div id="plan-items-empty" class="empty-state hidden" style="padding:24px 12px;">
+        <p>No items yet. Tap <strong>+ Add item</strong> to plan a spend.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+  <script src="js/firebase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/admin-config.js"></script>
+  <script src="js/plan.js"></script>
+  <script src="js/pwa.js"></script>
+
+  <script>
+    mountThemeToggle(document.getElementById("header-actions"));
+    loadPlan();
+  </script>
+</body>
+</html>

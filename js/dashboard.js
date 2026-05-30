@@ -4,7 +4,9 @@ let userId = null;
 let userSalary = 0;
 let trendsChart = null;
 let ytdPieChart = null;
-let currentTab = "monthly";
+let currentTab = (function () {
+  try { return localStorage.getItem("dashTab") || "monthly"; } catch (e) { return "monthly"; }
+})();
 
 // Local copy of categories so the dashboard YTD pie can color slices.
 const CATEGORY_COLORS = {
@@ -18,22 +20,23 @@ const CATEGORY_LABELS = {
 
 function switchDashTab(tab) {
   currentTab = tab;
-  const monthlyView = document.getElementById("monthly-view");
-  const budgetsView = document.getElementById("budgets-view");
-  const tabMonthly = document.getElementById("tab-monthly");
-  const tabBudgets = document.getElementById("tab-budgets");
+  try { localStorage.setItem("dashTab", tab); } catch (e) {}
+  const views = {
+    monthly: document.getElementById("monthly-view"),
+    budgets: document.getElementById("budgets-view"),
+    plans: document.getElementById("plans-view")
+  };
+  const tabs = {
+    monthly: document.getElementById("tab-monthly"),
+    budgets: document.getElementById("tab-budgets"),
+    plans: document.getElementById("tab-plans")
+  };
 
-  if (tab === "monthly") {
-    monthlyView.classList.remove("hidden");
-    budgetsView.classList.add("hidden");
-    tabMonthly.classList.add("active");
-    tabBudgets.classList.remove("active");
-  } else {
-    budgetsView.classList.remove("hidden");
-    monthlyView.classList.add("hidden");
-    tabBudgets.classList.add("active");
-    tabMonthly.classList.remove("active");
-  }
+  Object.keys(views).forEach(function (key) {
+    const isActive = key === tab;
+    views[key].classList.toggle("hidden", !isActive);
+    tabs[key].classList.toggle("active", isActive);
+  });
 }
 
 async function loadDashboard() {
@@ -60,7 +63,7 @@ async function loadDashboard() {
   document.getElementById("greeting").textContent = "Hi, " + data.name;
   document.getElementById("salary").innerHTML = "Monthly salary: <strong>" + formatMoney(userSalary) + "</strong>";
 
-  await Promise.all([renderMonths(), renderBudgets()]);
+  await Promise.all([renderMonths(), renderBudgets(), renderPlans()]);
 
   // Hide loading skeletons, show real content (active tab only)
   const loadingEl = document.getElementById("dash-loading");
@@ -592,4 +595,113 @@ async function createNewBudget() {
 
   document.body.appendChild(backdrop);
   setTimeout(function () { backdrop.querySelector("#budget-name-input").focus(); }, 50);
+}
+
+// ============================================================
+// Plans — forecast ledgers (start balance → subtract each item)
+// ============================================================
+
+async function renderPlans() {
+  const listEl = document.getElementById("plans-list");
+  const emptyEl = document.getElementById("plans-empty");
+  listEl.innerHTML = "";
+
+  const plansSnap = await db.collection("users").doc(userId)
+    .collection("plans")
+    .orderBy("createdAt", "desc")
+    .get();
+
+  if (plansSnap.empty) {
+    emptyEl.classList.remove("hidden");
+    return;
+  }
+  emptyEl.classList.add("hidden");
+
+  let i = 0;
+  for (const planDoc of plansSnap.docs) {
+    const p = planDoc.data();
+    const startBalance = Number(p.startBalance) || 0;
+    const itemsSnap = await planDoc.ref.collection("items").get();
+
+    let usedUp = 0;     // sum of effective costs (actual if done, else planned)
+    let doneCount = 0;
+    itemsSnap.forEach(function (it) {
+      const item = it.data();
+      const effective = item.status === "done"
+        ? (Number(item.actual) || 0)
+        : (Number(item.planned) || 0);
+      usedUp += effective;
+      if (item.status === "done") doneCount++;
+    });
+
+    const remaining = startBalance - usedUp;
+    const total = itemsSnap.size;
+
+    const card = document.createElement("a");
+    card.className = "budget-card";
+    card.href = "plan.html?id=" + planDoc.id;
+    card.style.animationDelay = (i * 50) + "ms";
+
+    card.innerHTML =
+      '<div class="budget-row-top">' +
+        '<div class="budget-name">' + escapeHtml(p.name) + '</div>' +
+        '<div class="budget-amount-tag">Start ' + formatMoney(startBalance) + '</div>' +
+      '</div>' +
+      '<div class="budget-stats">' +
+        '<span>' + doneCount + '/' + total + ' done</span>' +
+        '<span>Remaining <strong style="color:' + (remaining < 0 ? "var(--danger)" : "var(--success)") + ';">' + formatMoney(remaining) + '</strong></span>' +
+      '</div>';
+
+    listEl.appendChild(card);
+    i++;
+  }
+}
+
+async function createNewPlan() {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML =
+    '<div class="modal-card">' +
+      '<h3>New Plan</h3>' +
+      '<div class="add-expense-form">' +
+        '<div class="form-group">' +
+          '<label for="plan-name-input">Plan name</label>' +
+          '<input type="text" id="plan-name-input" placeholder="e.g. May Planning">' +
+        '</div>' +
+        '<div class="form-group">' +
+          '<label for="plan-balance-input">Starting balance (₹)</label>' +
+          '<input type="number" id="plan-balance-input" placeholder="e.g. 13980" min="0">' +
+        '</div>' +
+      '</div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn-secondary" data-act="cancel">Cancel</button>' +
+        '<button class="btn-primary" data-act="ok">Create</button>' +
+      '</div>' +
+    '</div>';
+
+  function cleanup() {
+    if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+  }
+
+  backdrop.querySelector('[data-act="cancel"]').addEventListener("click", cleanup);
+  backdrop.addEventListener("click", function (e) { if (e.target === backdrop) cleanup(); });
+
+  backdrop.querySelector('[data-act="ok"]').addEventListener("click", async function () {
+    const name = backdrop.querySelector("#plan-name-input").value.trim();
+    const startBalance = Number(backdrop.querySelector("#plan-balance-input").value);
+    if (!name) return showToast("Enter a plan name.", "error");
+    if (!startBalance || startBalance <= 0) return showToast("Enter a valid starting balance.", "error");
+
+    const ref = await db.collection("users").doc(userId)
+      .collection("plans").add({
+        name: name,
+        startBalance: startBalance,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    cleanup();
+    window.location.href = "plan.html?id=" + ref.id;
+  });
+
+  document.body.appendChild(backdrop);
+  setTimeout(function () { backdrop.querySelector("#plan-name-input").focus(); }, 50);
 }

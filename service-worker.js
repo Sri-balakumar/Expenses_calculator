@@ -1,6 +1,6 @@
 // Service worker — caches the app shell so it loads instantly + works offline.
 
-const CACHE_NAME = "expense-calc-v3";
+const CACHE_NAME = "expense-calc-v13";
 
 const APP_SHELL = [
   "./",
@@ -8,6 +8,7 @@ const APP_SHELL = [
   "./dashboard.html",
   "./month.html",
   "./year.html",
+  "./plan.html",
   "./profile.html",
   "./admin-login.html",
   "./admin.html",
@@ -22,6 +23,7 @@ const APP_SHELL = [
   "./js/admin-config.js",
   "./js/dashboard.js",
   "./js/month.js",
+  "./js/plan.js",
   "./js/year.js",
   "./js/admin.js",
   "./js/pwa.js"
@@ -68,20 +70,22 @@ self.addEventListener("fetch", function (event) {
     return;
   }
 
-  // Same-origin: cache-first with network fallback
+  // Same-origin: network-first with cache fallback.
+  // This guarantees the latest HTML/CSS/JS loads whenever online, while still
+  // working offline by falling back to the cached copy.
   if (url.origin === self.location.origin) {
     event.respondWith(
-      caches.match(req).then(function (cached) {
-        if (cached) return cached;
-        return fetch(req).then(function (response) {
-          // Cache new same-origin resources for next time
-          if (response && response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then(function (cache) { cache.put(req, clone); });
-          }
-          return response;
-        }).catch(function () {
-          // Offline + not in cache → fall back to index for navigation requests
+      fetch(req).then(function (response) {
+        // Refresh the cache with the latest copy for offline use
+        if (response && response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then(function (cache) { cache.put(req, clone); });
+        }
+        return response;
+      }).catch(function () {
+        // Offline → serve the cached copy if we have it
+        return caches.match(req).then(function (cached) {
+          if (cached) return cached;
           if (req.mode === "navigate") return caches.match("./index.html");
           return new Response("Offline", { status: 503, statusText: "Offline" });
         });

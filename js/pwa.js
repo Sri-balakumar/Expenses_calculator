@@ -1,8 +1,31 @@
 // PWA helper — registers the service worker + shows an Install button when eligible.
 
 if ("serviceWorker" in navigator) {
+  // Auto-reload the page once when a new service worker takes control,
+  // so the latest code/styles always load without a manual hard-refresh.
+  let swRefreshing = false;
+  navigator.serviceWorker.addEventListener("controllerchange", function () {
+    if (swRefreshing) return;
+    swRefreshing = true;
+    window.location.reload();
+  });
+
   window.addEventListener("load", function () {
     navigator.serviceWorker.register("./service-worker.js")
+      .then(function (reg) {
+        // Check for an updated worker on every load
+        reg.update();
+        reg.addEventListener("updatefound", function () {
+          const newWorker = reg.installing;
+          if (!newWorker) return;
+          newWorker.addEventListener("statechange", function () {
+            // A new version finished installing while a page is already controlled
+            if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+              newWorker.postMessage && newWorker.postMessage({ type: "SKIP_WAITING" });
+            }
+          });
+        });
+      })
       .catch(function (err) { console.warn("SW register failed:", err); });
   });
 }

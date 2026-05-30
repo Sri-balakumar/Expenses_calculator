@@ -235,9 +235,10 @@ body.auth-page::after {
 }
 
 .tab-btn.active {
-  background: var(--card-bg);
-  color: var(--text);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  background: #ffffff;
+  color: var(--primary);
+  font-weight: 800;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.55), 0 4px 14px rgba(99, 102, 241, 0.4);
 }
 
 .auth-form {
@@ -255,6 +256,7 @@ body.auth-page::after {
   background: var(--card-bg);
   border-radius: 20px;
   padding: 28px;
+  margin-bottom: 16px;
   box-shadow: var(--card-shadow);
   animation: slideUp 0.5s ease-out;
   transition: background 0.25s;
@@ -336,6 +338,29 @@ textarea {
 }
 
 .input-wrap input { padding-left: 42px; }
+
+/* Show/hide password eye toggle */
+.input-wrap.has-pw-toggle input { padding-right: 46px; }
+.pw-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 0;
+  border-radius: 8px;
+  color: #9ca3af;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.pw-toggle:hover { color: var(--primary); background: var(--chip-bg); }
+.pw-toggle svg { width: 18px; height: 18px; }
 
 input:focus {
   outline: none;
@@ -430,8 +455,9 @@ button:active { transform: scale(0.97); }
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  text-decoration: none;
 }
-.logout-link:hover { background: var(--chip-bg); color: var(--text); }
+.logout-link:hover { background: var(--chip-bg); color: var(--text); text-decoration: none; }
 
 /* SVG sizing inside buttons */
 button svg { width: 18px; height: 18px; flex-shrink: 0; }
@@ -1191,6 +1217,134 @@ button.disabled {
 }
 .budget-stats strong { color: var(--text); font-weight: 700; }
 
+/* ============================================================
+   Plans — forecast ledger
+   ============================================================ */
+.plan-summary {
+  display: flex;
+  gap: 10px;
+}
+.plan-summary-cell {
+  flex: 1;
+  text-align: center;
+}
+.plan-summary-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.plan-summary-value {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.plan-row {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.plan-row:last-child { border-bottom: none; }
+.plan-row.is-done .plan-row-name { opacity: 0.85; }
+
+.plan-row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.plan-row-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.plan-row-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.plan-row-cost { font-size: 0.85rem; color: var(--text-muted); }
+.plan-planned { color: var(--text-muted); }
+.plan-actual { color: var(--text); font-weight: 600; }
+.plan-planned-muted { color: var(--text-muted); font-size: 0.78rem; }
+
+.plan-month-tag {
+  font-size: 0.7rem;
+  color: var(--primary);
+  background: var(--chip-bg);
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.diff-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+.diff-over   { color: var(--danger);  background: rgba(239, 68, 68, 0.14); }
+.diff-saved  { color: var(--success); background: rgba(34, 197, 94, 0.14); }
+.diff-exact  { color: var(--text-muted); background: var(--chip-bg); }
+
+.plan-running {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--text);
+  flex-shrink: 0;
+}
+.plan-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.plan-done-btn {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 9px 18px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+  transition: filter 0.15s, transform 0.08s;
+}
+.plan-done-btn svg { width: 16px; height: 16px; }
+.plan-done-btn:hover { filter: brightness(1.1); }
+.plan-done-btn:active { transform: scale(0.97); }
+.plan-done-chip {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--success);
+  background: rgba(34, 197, 94, 0.14);
+  padding: 7px 14px;
+  border-radius: 10px;
+}
+
+.plan-select {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1.5px solid var(--border);
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
 /* Dashboard mode tabs */
 .dash-tabs {
   margin-bottom: 20px;
@@ -1518,7 +1672,10 @@ a {
   color: var(--primary);
   text-decoration: none;
 }
-a:hover { text-decoration: underline; }
+/* Only plain text links underline on hover. Links styled as cards/buttons
+   carry a class (month-card, budget-card, btn-secondary, logout-link, etc.)
+   and must never show an underline. */
+a:not([class]):hover { text-decoration: underline; }
 
 .back-link {
   display: inline-flex;
@@ -1553,6 +1710,57 @@ a:hover { text-decoration: underline; }
   .total-amount { font-size: 2.1rem; }
   .btn-plus, .btn-minus { width: 52px; height: 52px; font-size: 1.4rem; }
   .month-card-icon { width: 40px; height: 40px; }
+}
+
+/* ============================================================
+   Side-by-side card pair utility (single column on mobile,
+   two columns on desktop). Used on dashboard, month, profile.
+   ============================================================ */
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+/* gap handles spacing between the paired cards, so cancel their own margin */
+.grid-2 > .card { margin-bottom: 0; }
+
+/* ============================================================
+   Desktop / wide-screen layout (≥1024px)
+   ============================================================ */
+
+@media (min-width: 1024px) {
+  body { padding: 28px 20px; }
+
+  .container { max-width: 760px; }
+
+  /* Cards stay stacked as separate full-width boxes in the narrow column */
+  .grid-2 {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    align-items: start;
+  }
+  .grid-2 > .card { margin-bottom: 0; }
+
+  /* Month/budget/year tile lists become responsive grids */
+  #months-list,
+  #budgets-list,
+  #year-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+  }
+  #months-list .month-card,
+  #budgets-list .budget-card,
+  #year-grid .month-card {
+    margin-bottom: 0;
+  }
+
+  /* New-month picker tiles spread out a bit */
+  .month-grid {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
 }
 
 /* Respect users who prefer less motion */
