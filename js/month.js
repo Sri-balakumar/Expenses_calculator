@@ -562,13 +562,9 @@ function updateTotal(spent) {
   const labelEl = document.getElementById("total-label");
   const breakdownEl = document.getElementById("total-breakdown");
 
-  // Remaining of the income (salary for months, amount for budgets).
-  const remaining = userSalary - spent;
-  // Total remaining adds the cash on hand entered at month creation.
-  const totalRemaining = userSalary + monthCurrentBalance - spent;
-
   if (trackerType === "budget") {
-    // Budgets: single figure, no salary/balance breakdown.
+    // Budgets: single figure (amount − spent), no breakdown.
+    const remaining = userSalary - spent;
     if (breakdownEl) breakdownEl.classList.add("hidden");
     labelEl.textContent = remaining >= 0 ? "Remaining" : "Over budget by";
     animateCount(amountEl, Math.abs(remaining), formatMoney);
@@ -577,8 +573,9 @@ function updateTotal(spent) {
     return;
   }
 
-  // Months: headline = total remaining (salary + current balance − spent),
-  // with a Salary / Current balance / Remaining breakdown underneath.
+  // Months: the current balance already includes salary, so the total is simply
+  // current balance − spent. Breakdown shows Current balance and Spent.
+  const totalRemaining = monthCurrentBalance - spent;
   labelEl.textContent = totalRemaining >= 0 ? "Total remaining" : "Over budget by";
   animateCount(amountEl, Math.abs(totalRemaining), formatMoney);
 
@@ -589,9 +586,7 @@ function updateTotal(spent) {
     breakdownEl.classList.remove("hidden");
     document.getElementById("tb-salary").textContent = formatMoney(userSalary);
     document.getElementById("tb-balance").textContent = formatMoney(monthCurrentBalance);
-    const remEl = document.getElementById("tb-remaining");
-    remEl.textContent = formatMoney(remaining);
-    remEl.style.color = remaining < 0 ? "var(--danger)" : "";
+    document.getElementById("tb-spent").textContent = formatMoney(spent);
   }
 }
 
@@ -784,11 +779,17 @@ function buildExportRows(weekFilter) {
       Week: e.createdAt ? "Week " + weekOfMonth(e.createdAt) : ""
     };
   });
+  // Budgets: amount − net. Months: current balance − net (balance already
+  // includes salary, so salary is not added).
+  const netSpent = totalSpent - totalIncome;
+  const remaining = (trackerType === "budget")
+    ? userSalary - netSpent
+    : monthCurrentBalance - netSpent;
   return {
     rows: rows,
     totalSpent: totalSpent,
     totalIncome: totalIncome,
-    remaining: userSalary + monthCurrentBalance - (totalSpent - totalIncome)
+    remaining: remaining
   };
 }
 
@@ -921,8 +922,14 @@ async function downloadPDF() {
   doc.line(14, 25, pageW - 14, 25);
 
   // ---- Summary block inside a bordered box ----
-  const summary = [["Name", userName || "-"], [limitLabel, "Rs. " + userSalary.toLocaleString("en-IN")]];
-  if (!isBudget) summary.push(["Current Balance", "Rs. " + monthCurrentBalance.toLocaleString("en-IN")]);
+  // Budgets show Budget Amount. Months show Salary (info) + Current Balance.
+  const summary = [["Name", userName || "-"]];
+  if (isBudget) {
+    summary.push([limitLabel, "Rs. " + userSalary.toLocaleString("en-IN")]);
+  } else {
+    summary.push(["Salary", "Rs. " + userSalary.toLocaleString("en-IN")]);
+    summary.push(["Current Balance", "Rs. " + monthCurrentBalance.toLocaleString("en-IN")]);
+  }
   summary.push(["Total Spend", "Rs. " + data.totalSpent.toLocaleString("en-IN")]);
   summary.push(["Total Income", "Rs. " + data.totalIncome.toLocaleString("en-IN")]);
   summary.push([isBudget ? "Remaining" : "Total Remaining", "Rs. " + data.remaining.toLocaleString("en-IN")]);
@@ -1008,8 +1015,14 @@ async function downloadExcel() {
   const reportTitle = (isBudget ? "Budget Report — " : "Expense Report — ") + monthName;
 
   // Summary rows (label, value) — order mirrors the PDF.
-  const summary = [["Name", userName || "-"], [limitLabel, userSalary]];
-  if (!isBudget) summary.push(["Current Balance (₹)", monthCurrentBalance]);
+  // Budgets show Budget Amount. Months show Salary (info) + Current Balance.
+  const summary = [["Name", userName || "-"]];
+  if (isBudget) {
+    summary.push([limitLabel, userSalary]);
+  } else {
+    summary.push(["Salary (₹)", userSalary]);
+    summary.push(["Current Balance (₹)", monthCurrentBalance]);
+  }
   summary.push(["Total Spend (₹)", data.totalSpent]);
   summary.push(["Total Income (₹)", data.totalIncome]);
   summary.push([isBudget ? "Remaining (₹)" : "Total Remaining (₹)", data.remaining]);
