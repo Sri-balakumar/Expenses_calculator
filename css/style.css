@@ -319,6 +319,7 @@ input[type="text"],
 input[type="number"],
 input[type="email"],
 input[type="password"],
+input[type="date"],
 textarea {
   width: 100%;
   padding: 12px 14px;
@@ -330,6 +331,10 @@ textarea {
   font-family: inherit;
   transition: border-color 0.15s, box-shadow 0.15s, background 0.25s;
 }
+
+/* Native date picker matches the theme (text + calendar icon readable in dark) */
+input[type="date"] { color-scheme: light; }
+[data-theme="dark"] input[type="date"] { color-scheme: dark; }
 
 textarea {
   resize: vertical;
@@ -609,6 +614,51 @@ button svg { width: 18px; height: 18px; flex-shrink: 0; }
   letter-spacing: -0.02em;
   position: relative;
 }
+
+/* Salary / Current balance / Remaining breakdown under the headline */
+.total-breakdown {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+}
+[data-theme="dark"] .total-breakdown {
+  border-top-color: rgba(255, 255, 255, 0.18);
+}
+.tb-cell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.tb-label {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  opacity: 0.8;
+}
+.tb-val {
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+/* Editable Current balance cell (button styled to match the breakdown cells) */
+.tb-editable {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-align: center;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+.tb-editable:hover { background: rgba(255, 255, 255, 0.14); }
+.tb-editable:active { transform: scale(0.98); }
 
 /* ============================================================
    Expense list
@@ -1333,6 +1383,125 @@ button.disabled {
   background: rgba(34, 197, 94, 0.14);
   padding: 7px 14px;
   border-radius: 10px;
+}
+
+/* Plan card (dashboard list) — list view only, Mark done / Reopen */
+.budget-card.plan-card-static { cursor: default; }
+.budget-card.plan-card-static:hover {
+  transform: none;
+  box-shadow: var(--card-shadow);
+  border-color: transparent;
+}
+.budget-card.is-plan-done { opacity: 0.6; }
+.budget-card.is-plan-done:hover { opacity: 0.85; }
+
+.plan-card-month-tag {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--primary);
+  background: var(--chip-bg);
+  padding: 2px 8px;
+  border-radius: 999px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.plan-card-done-tag {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--success);
+  background: rgba(34, 197, 94, 0.14);
+  padding: 2px 8px;
+  border-radius: 999px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.plan-card-foot {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+.plan-card-done,
+.plan-card-reopen {
+  border: none;
+  border-radius: 10px;
+  padding: 8px 16px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.08s;
+}
+.plan-card-done {
+  background: var(--success);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);
+}
+.plan-card-reopen {
+  background: var(--chip-bg);
+  color: var(--text);
+}
+.plan-card-done:hover,
+.plan-card-reopen:hover { filter: brightness(1.08); }
+.plan-card-done:active,
+.plan-card-reopen:active { transform: scale(0.97); }
+
+/* Export week picker */
+.week-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 2px;
+}
+.week-pick-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--chip-bg);
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.week-pick-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.week-pick-all {
+  background: transparent;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  margin-bottom: 4px;
+}
+
+/* Mark-done modal — starting balance vs spent vs difference */
+.plan-done-compare {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 14px 12px;
+  background: var(--chip-bg);
+  border-radius: 12px;
+}
+.pdc-cell {
+  flex: 1;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.pdc-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.pdc-val {
+  font-size: 1rem;
+  font-weight: 800;
 }
 
 .plan-select {

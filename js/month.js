@@ -32,6 +32,8 @@ let selectedPayment = DEFAULT_PAYMENT;
 let userId = null;
 let userName = "";
 let userSalary = 0;       // for type=month, this is the user's salary; for type=budget, this is the budget amount
+let monthCurrentBalance = 0; // cash on hand entered at month creation (months only)
+let monthSpent = 0;       // latest computed spend, so the total can be recomputed after edits
 let monthId = null;
 let monthName = "";
 let trackerType = "month"; // "month" or "budget"
@@ -42,7 +44,6 @@ let knownExpenseIds = new Set();
 // State for forms
 let selectedCategory = DEFAULT_CATEGORY;
 let editing = null; // { id, type, category }
-let categoryChart = null;
 
 const TRASH_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
@@ -96,6 +97,9 @@ async function loadMonth() {
   userSalary = trackerType === "budget"
     ? Number(data.amount) || 0
     : Number(userDoc.data().salary) || 0;
+  // Cash on hand entered when the month was created (months only). Added on top
+  // of salary for the month's total remaining.
+  monthCurrentBalance = trackerType === "budget" ? 0 : Number(data.currentBalance) || 0;
 
   document.getElementById("month-name").textContent = monthName;
 
@@ -121,10 +125,63 @@ async function loadMonth() {
     if (editing) editing.paymentMethod = key;
   });
 
+  // Tap the Current balance cell to edit it (months only).
+  const balanceCell = document.getElementById("tb-balance-cell");
+  if (balanceCell && trackerType !== "budget") {
+    balanceCell.addEventListener("click", editCurrentBalance);
+  }
+
+  // Default the Add Expense date to today.
+  const dateInput = document.getElementById("expense-date");
+  if (dateInput) dateInput.value = todayStr();
+
   expensesRef = itemDoc.ref.collection("expenses");
   expensesRef.orderBy("createdAt", "desc").onSnapshot(function (snap) {
     renderExpenses(snap);
   });
+}
+
+// Edit the month's current balance (cash on hand). Updates the doc + total live.
+function editCurrentBalance() {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML =
+    '<div class="modal-card">' +
+      '<h3>Current balance</h3>' +
+      '<div class="add-expense-form">' +
+        '<div class="form-group">' +
+          '<label for="cb-input">Cash on hand (₹)</label>' +
+          '<input type="number" id="cb-input" min="0" placeholder="e.g. 5000">' +
+          '<p style="margin:6px 0 0;font-size:0.8rem;color:var(--text-muted);">Added on top of your salary for this month\'s total remaining.</p>' +
+        '</div>' +
+      '</div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn-secondary" data-act="cancel">Cancel</button>' +
+        '<button class="btn-primary" data-act="ok">Save</button>' +
+      '</div>' +
+    '</div>';
+
+  function cleanup() { if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop); }
+  backdrop.querySelector('[data-act="cancel"]').addEventListener("click", cleanup);
+  backdrop.addEventListener("click", function (e) { if (e.target === backdrop) cleanup(); });
+
+  const input = backdrop.querySelector("#cb-input");
+  input.value = monthCurrentBalance || 0;
+
+  backdrop.querySelector('[data-act="ok"]').addEventListener("click", async function () {
+    const val = Number(input.value);
+    if (input.value === "" || isNaN(val) || val < 0) return showToast("Enter a valid amount.", "error");
+    cleanup();
+    monthCurrentBalance = val;
+    await db.collection("users").doc(userId)
+      .collection("months").doc(monthId)
+      .update({ currentBalance: val });
+    updateTotal(monthSpent); // refresh the header with the new balance
+    showToast("Current balance updated.", "success");
+  });
+
+  document.body.appendChild(backdrop);
+  setTimeout(function () { input.focus(); input.select(); }, 50);
 }
 
 // ============================================================
@@ -215,12 +272,10 @@ function renderExpenses(snap) {
   if (currentExpenses.length === 0) {
     emptyEl.classList.remove("hidden");
     document.getElementById("weekly-card").classList.add("hidden");
-    document.getElementById("chart-card").classList.add("hidden");
     setDownloadEnabled(false);
   } else {
     emptyEl.classList.add("hidden");
     renderWeeklyBreakdown(currentExpenses);
-    renderPieChart(currentExpenses);
     renderCategoryBudgets(currentExpenses);
     applyFilters();
     setDownloadEnabled(true);
@@ -500,61 +555,44 @@ async function renderCategoryBudgets(expenses) {
   }
 }
 
-function renderPieChart(expenses) {
-  const card = document.getElementById("chart-card");
-
-  // Aggregate spend (minus) by category
-  const sums = {};
-  expenses.forEach(function (e) {
-    if (e.type !== "minus") return;
-    const c = e.category || DEFAULT_CATEGORY;
-    sums[c] = (sums[c] || 0) + e.amount;
-  });
-
-  const keys = Object.keys(sums);
-  if (keys.length === 0 || !window.Chart) {
-    card.classList.add("hidden");
-    if (categoryChart) { categoryChart.destroy(); categoryChart = null; }
-    return;
-  }
-  card.classList.remove("hidden");
-
-  const labels = keys.map(function (k) { return CATEGORIES[k] ? CATEGORIES[k].label : k; });
-  const data = keys.map(function (k) { return sums[k]; });
-  const colors = keys.map(function (k) { return CATEGORIES[k] ? CATEGORIES[k].color : "#9ca3af"; });
-
-  const ctx = document.getElementById("category-chart").getContext("2d");
-  if (categoryChart) categoryChart.destroy();
-  categoryChart = new Chart(ctx, {
-    type: "doughnut",
-    data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 2, borderColor: "#fff" }] },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { position: "bottom", labels: { boxWidth: 14, font: { size: 12 } } },
-        tooltip: {
-          callbacks: {
-            label: function (ctx) { return ctx.label + ": " + formatMoney(ctx.parsed); }
-          }
-        }
-      },
-      cutout: "60%"
-    }
-  });
-}
-
 function updateTotal(spent) {
-  const remaining = userSalary - spent;
+  monthSpent = spent; // remember so edits to current balance can recompute
   const totalEl = document.getElementById("total-display");
   const amountEl = document.getElementById("total-amount");
   const labelEl = document.getElementById("total-label");
+  const breakdownEl = document.getElementById("total-breakdown");
 
-  labelEl.textContent = remaining >= 0 ? "Remaining" : "Over budget by";
-  animateCount(amountEl, Math.abs(remaining), formatMoney);
+  // Remaining of the income (salary for months, amount for budgets).
+  const remaining = userSalary - spent;
+  // Total remaining adds the cash on hand entered at month creation.
+  const totalRemaining = userSalary + monthCurrentBalance - spent;
+
+  if (trackerType === "budget") {
+    // Budgets: single figure, no salary/balance breakdown.
+    if (breakdownEl) breakdownEl.classList.add("hidden");
+    labelEl.textContent = remaining >= 0 ? "Remaining" : "Over budget by";
+    animateCount(amountEl, Math.abs(remaining), formatMoney);
+    totalEl.classList.remove("under", "over");
+    totalEl.classList.add(remaining >= 0 ? "under" : "over");
+    return;
+  }
+
+  // Months: headline = total remaining (salary + current balance − spent),
+  // with a Salary / Current balance / Remaining breakdown underneath.
+  labelEl.textContent = totalRemaining >= 0 ? "Total remaining" : "Over budget by";
+  animateCount(amountEl, Math.abs(totalRemaining), formatMoney);
 
   totalEl.classList.remove("under", "over");
-  totalEl.classList.add(remaining >= 0 ? "under" : "over");
+  totalEl.classList.add(totalRemaining >= 0 ? "under" : "over");
+
+  if (breakdownEl) {
+    breakdownEl.classList.remove("hidden");
+    document.getElementById("tb-salary").textContent = formatMoney(userSalary);
+    document.getElementById("tb-balance").textContent = formatMoney(monthCurrentBalance);
+    const remEl = document.getElementById("tb-remaining");
+    remEl.textContent = formatMoney(remaining);
+    remEl.style.color = remaining < 0 ? "var(--danger)" : "";
+  }
 }
 
 function setDownloadEnabled(enabled) {
@@ -566,10 +604,33 @@ function setDownloadEnabled(enabled) {
 // Add expense
 // ============================================================
 
+// Local today as a YYYY-MM-DD string (for the date input default).
+function todayStr() {
+  const d = new Date();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return d.getFullYear() + "-" + mo + "-" + day;
+}
+
+// Turn the date-input value into a createdAt for Firestore. Empty → server time.
+// A chosen day keeps the current time-of-day so same-day entries still order well.
+function dateValueToCreatedAt(value) {
+  if (!value) return firebase.firestore.FieldValue.serverTimestamp();
+  const p = value.split("-");
+  const now = new Date();
+  const chosen = new Date(
+    Number(p[0]), Number(p[1]) - 1, Number(p[2]),
+    now.getHours(), now.getMinutes(), now.getSeconds()
+  );
+  if (isNaN(chosen.getTime())) return firebase.firestore.FieldValue.serverTimestamp();
+  return firebase.firestore.Timestamp.fromDate(chosen);
+}
+
 async function addExpense(type) {
   const nameInput = document.getElementById("expense-name");
   const amountInput = document.getElementById("expense-amount");
   const notesInput = document.getElementById("expense-notes");
+  const dateInput = document.getElementById("expense-date");
 
   const name = nameInput.value.trim();
   const amount = Number(amountInput.value);
@@ -584,7 +645,7 @@ async function addExpense(type) {
     type: type,
     category: selectedCategory,
     notes: notes,
-    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    createdAt: dateValueToCreatedAt(dateInput ? dateInput.value : "")
   };
   if (type === "minus") payload.paymentMethod = selectedPayment;
 
@@ -598,6 +659,7 @@ async function addExpense(type) {
   nameInput.value = "";
   amountInput.value = "";
   notesInput.value = "";
+  if (dateInput) dateInput.value = todayStr();
   selectedCategory = DEFAULT_CATEGORY;
   setActiveChip("category-picker", DEFAULT_CATEGORY);
   selectedPayment = DEFAULT_PAYMENT;
@@ -700,10 +762,14 @@ function hexToRgba(hex, alpha) {
 // PDF + Excel export (now with category column)
 // ============================================================
 
-function buildExportRows() {
+// weekFilter: a Set of week numbers to include, or null/undefined for all.
+function buildExportRows(weekFilter) {
   let totalSpent = 0;
   let totalIncome = 0;
-  const rows = currentExpenses.map(function (e) {
+  const source = (weekFilter instanceof Set)
+    ? currentExpenses.filter(function (e) { return e.createdAt && weekFilter.has(weekOfMonth(e.createdAt)); })
+    : currentExpenses;
+  const rows = source.map(function (e) {
     if (e.type === "plus") totalIncome += e.amount;
     else totalSpent += e.amount;
     const cat = CATEGORIES[e.category] || CATEGORIES.other;
@@ -722,97 +788,309 @@ function buildExportRows() {
     rows: rows,
     totalSpent: totalSpent,
     totalIncome: totalIncome,
-    remaining: userSalary - (totalSpent - totalIncome)
+    remaining: userSalary + monthCurrentBalance - (totalSpent - totalIncome)
   };
 }
 
-function downloadPDF() {
+// Load a script once, on demand. Cached so repeat exports are instant.
+const _loadedScripts = {};
+function loadScript(src) {
+  if (_loadedScripts[src]) return _loadedScripts[src];
+  _loadedScripts[src] = new Promise(function (resolve, reject) {
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = function () { delete _loadedScripts[src]; reject(new Error("load failed: " + src)); };
+    document.head.appendChild(s);
+  });
+  return _loadedScripts[src];
+}
+
+// jspdf-autotable depends on jspdf, so load jspdf first.
+async function ensurePdfLibs() {
+  await loadScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js");
+  await loadScript("https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.1/dist/jspdf.plugin.autotable.min.js");
+}
+function ensureXlsx() {
+  return loadScript("https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js");
+}
+
+// Weeks that actually have expenses ("attended"), sorted ascending.
+function attendedWeeks() {
+  const weeks = new Set();
+  currentExpenses.forEach(function (e) {
+    if (e.createdAt) weeks.add(weekOfMonth(e.createdAt));
+  });
+  return Array.from(weeks).sort(function (a, b) { return a - b; });
+}
+
+// Ask which weeks to include before exporting. Resolves with:
+//   null      → include all (no filtering)
+//   Set<num>  → include only these weeks
+//   false     → user cancelled
+function pickWeeks() {
+  return new Promise(function (resolve) {
+    const weeks = attendedWeeks();
+    // Budgets have no week grouping, and a single/zero week needs no choice.
+    if (trackerType === "budget" || weeks.length <= 1) { resolve(null); return; }
+
+    const checks = weeks.map(function (w) {
+      return '<label class="week-pick-row"><input type="checkbox" class="week-cb" value="' + w + '" checked>' +
+        '<span>Week ' + w + '</span></label>';
+    }).join("");
+
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<h3>Which weeks to include?</h3>' +
+        '<div class="week-pick-list">' +
+          '<label class="week-pick-row week-pick-all"><input type="checkbox" id="week-all" checked><span><strong>All weeks</strong></span></label>' +
+          checks +
+        '</div>' +
+        '<div class="modal-actions">' +
+          '<button class="btn-secondary" data-act="cancel">Cancel</button>' +
+          '<button class="btn-primary" data-act="ok">Download</button>' +
+        '</div>' +
+      '</div>';
+
+    function cleanup() { if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop); }
+
+    const allCb = backdrop.querySelector("#week-all");
+    const weekCbs = Array.prototype.slice.call(backdrop.querySelectorAll(".week-cb"));
+
+    allCb.addEventListener("change", function () {
+      weekCbs.forEach(function (cb) { cb.checked = allCb.checked; });
+    });
+    weekCbs.forEach(function (cb) {
+      cb.addEventListener("change", function () {
+        allCb.checked = weekCbs.every(function (c) { return c.checked; });
+      });
+    });
+
+    backdrop.querySelector('[data-act="cancel"]').addEventListener("click", function () { cleanup(); resolve(false); });
+    backdrop.addEventListener("click", function (e) { if (e.target === backdrop) { cleanup(); resolve(false); } });
+    backdrop.querySelector('[data-act="ok"]').addEventListener("click", function () {
+      const selected = weekCbs.filter(function (c) { return c.checked; }).map(function (c) { return Number(c.value); });
+      if (selected.length === 0) { showToast("Pick at least one week.", "error"); return; }
+      cleanup();
+      // All selected → null (include everything, incl. expenses without a week).
+      resolve(selected.length === weeks.length ? null : new Set(selected));
+    });
+
+    document.body.appendChild(backdrop);
+  });
+}
+
+async function downloadPDF() {
   if (currentExpenses.length === 0) {
     showToast("Add at least one expense before downloading.", "error");
     return;
   }
+  const weekFilter = await pickWeeks();
+  if (weekFilter === false) return; // cancelled
+
+  try {
+    await ensurePdfLibs();
+  } catch (e) {
+    showToast("PDF library failed to load. Check your internet and try again.", "error");
+    return;
+  }
   if (!window.jspdf || !window.jspdf.jsPDF) {
-    showToast("PDF library failed to load. Check your internet and reload.", "error");
+    showToast("PDF library failed to load. Check your internet and try again.", "error");
     return;
   }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
 
-  const data = buildExportRows();
+  const data = buildExportRows(weekFilter);
+  const isBudget = trackerType === "budget";
+  const limitLabel = isBudget ? "Budget Amount" : "Salary";
+  const reportTitle = (isBudget ? "Budget Report" : "Expense Report") + " - " + monthName;
 
-  const limitLabel = trackerType === "budget" ? "Budget Amount" : "Salary";
-  const reportTitle = (trackerType === "budget" ? "Budget Report - " : "Expense Report - ") + monthName;
+  // ---- Title (Times New Roman, centered) with an accent rule underneath ----
+  doc.setFont("times", "bold");
+  doc.setFontSize(20);
+  doc.setTextColor(35, 35, 60);
+  doc.text(reportTitle, pageW / 2, 20, { align: "center" });
 
-  doc.setFontSize(18);
-  doc.text(reportTitle, 14, 18);
+  doc.setDrawColor(99, 102, 241);
+  doc.setLineWidth(0.8);
+  doc.line(14, 25, pageW - 14, 25);
 
+  // ---- Summary block inside a bordered box ----
+  const summary = [["Name", userName || "-"], [limitLabel, "Rs. " + userSalary.toLocaleString("en-IN")]];
+  if (!isBudget) summary.push(["Current Balance", "Rs. " + monthCurrentBalance.toLocaleString("en-IN")]);
+  summary.push(["Total Spend", "Rs. " + data.totalSpent.toLocaleString("en-IN")]);
+  summary.push(["Total Income", "Rs. " + data.totalIncome.toLocaleString("en-IN")]);
+  summary.push([isBudget ? "Remaining" : "Total Remaining", "Rs. " + data.remaining.toLocaleString("en-IN")]);
+
+  const boxX = 14, boxTop = 31, rowH = 7;
+  const boxH = summary.length * rowH + 6;
+  doc.setDrawColor(210, 212, 225);
+  doc.setLineWidth(0.3);
+  doc.setFillColor(247, 248, 255);
+  doc.roundedRect(boxX, boxTop, pageW - 28, boxH, 2, 2, "FD");
+
+  let y = boxTop + 8;
   doc.setFontSize(11);
-  doc.setTextColor(100);
-  doc.text("Name: " + userName, 14, 28);
-  doc.text(limitLabel + ": Rs. " + userSalary.toLocaleString("en-IN"), 14, 34);
-  doc.text("Total Spend: Rs. " + data.totalSpent.toLocaleString("en-IN"), 14, 40);
-  doc.text("Total Income: Rs. " + data.totalIncome.toLocaleString("en-IN"), 14, 46);
-  doc.text("Remaining: Rs. " + data.remaining.toLocaleString("en-IN"), 14, 52);
+  summary.forEach(function (s) {
+    doc.setFont("times", "bold");
+    doc.setTextColor(55, 48, 120);
+    doc.text(s[0] + ":", boxX + 5, y);
+    doc.setFont("times", "normal");
+    doc.setTextColor(40, 40, 50);
+    doc.text(String(s[1]), boxX + 55, y);
+    y += rowH;
+  });
 
-  const headRow = trackerType === "budget"
+  // ---- Table with grid borders + zebra striping ----
+  const headRow = isBudget
     ? [["#", "Name", "Category", "Type", "Payment", "Notes", "Amount (Rs.)"]]
     : [["#", "Week", "Name", "Category", "Type", "Payment", "Notes", "Amount (Rs.)"]];
   const bodyRows = data.rows.map(function (r, i) {
-    return trackerType === "budget"
+    return isBudget
       ? [i + 1, r.Name, r.Category, r.Type, r.Payment, r.Notes, r.Amount.toLocaleString("en-IN")]
       : [i + 1, r.Week, r.Name, r.Category, r.Type, r.Payment, r.Notes, r.Amount.toLocaleString("en-IN")];
   });
+  const amountCol = isBudget ? 6 : 7;
+  const columnStyles = {};
+  columnStyles[0] = { halign: "center", cellWidth: 10 };
+  columnStyles[amountCol] = { halign: "right", fontStyle: "bold", textColor: [35, 35, 60] };
 
   doc.autoTable({
-    startY: 60,
+    startY: boxTop + boxH + 6,
     head: headRow,
     body: bodyRows,
-    styles: { fontSize: 10 },
-    headStyles: { fillColor: [99, 102, 241] }
+    theme: "grid",
+    styles: { font: "times", fontSize: 10, cellPadding: 2.5, lineColor: [205, 207, 220], lineWidth: 0.2, textColor: [35, 35, 45] },
+    headStyles: { font: "times", fontStyle: "bold", fillColor: [99, 102, 241], textColor: [255, 255, 255], halign: "center", lineColor: [99, 102, 241], lineWidth: 0.2 },
+    alternateRowStyles: { fillColor: [243, 244, 255] },
+    columnStyles: columnStyles,
+    margin: { left: 14, right: 14 },
+    didDrawPage: function () {
+      doc.setFont("times", "italic");
+      doc.setFontSize(9);
+      doc.setTextColor(150, 150, 160);
+      doc.text("Generated by Expense Calculator", 14, pageH - 8);
+      doc.text("Page " + doc.internal.getNumberOfPages(), pageW - 14, pageH - 8, { align: "right" });
+    }
   });
 
   doc.save(safeFilename(monthName) + ".pdf");
   showToast("PDF downloaded", "success");
 }
 
-function downloadExcel() {
+async function downloadExcel() {
   if (currentExpenses.length === 0) {
     showToast("Add at least one expense before downloading.", "error");
     return;
   }
+  const weekFilter = await pickWeeks();
+  if (weekFilter === false) return; // cancelled
+
+  try {
+    await ensureXlsx();
+  } catch (e) {
+    showToast("Excel library failed to load. Check your internet and try again.", "error");
+    return;
+  }
   if (!window.XLSX) {
-    showToast("Excel library failed to load. Check your internet and reload.", "error");
+    showToast("Excel library failed to load. Check your internet and try again.", "error");
     return;
   }
 
-  const data = buildExportRows();
+  const data = buildExportRows(weekFilter);
+  const isBudget = trackerType === "budget";
+  const limitLabel = isBudget ? "Budget Amount (₹)" : "Salary (₹)";
+  const reportTitle = (isBudget ? "Budget Report — " : "Expense Report — ") + monthName;
 
-  const limitLabel = trackerType === "budget" ? "Budget Amount (₹)" : "Salary (₹)";
-  const reportTitle = (trackerType === "budget" ? "Budget Report — " : "Expense Report — ") + monthName;
+  // Summary rows (label, value) — order mirrors the PDF.
+  const summary = [["Name", userName || "-"], [limitLabel, userSalary]];
+  if (!isBudget) summary.push(["Current Balance (₹)", monthCurrentBalance]);
+  summary.push(["Total Spend (₹)", data.totalSpent]);
+  summary.push(["Total Income (₹)", data.totalIncome]);
+  summary.push([isBudget ? "Remaining (₹)" : "Total Remaining (₹)", data.remaining]);
 
-  const headerRows = [
-    [reportTitle],
-    ["Name", userName],
-    [limitLabel, userSalary],
-    ["Total Spend (₹)", data.totalSpent],
-    ["Total Income (₹)", data.totalIncome],
-    ["Remaining (₹)", data.remaining],
-    [],
-    trackerType === "budget"
-      ? ["#", "Name", "Category", "Type", "Payment", "Notes", "Amount (₹)"]
-      : ["#", "Week", "Name", "Category", "Type", "Payment", "Notes", "Amount (₹)"]
-  ];
+  const colHeader = isBudget
+    ? ["#", "Name", "Category", "Type", "Payment", "Notes", "Amount (₹)"]
+    : ["#", "Week", "Name", "Category", "Type", "Payment", "Notes", "Amount (₹)"];
+  const ncols = colHeader.length;
+
+  const headerRows = [[reportTitle]].concat(summary).concat([[]]).concat([colHeader]);
+  const headerRowIdx = headerRows.length - 1;          // the column-header row
   const bodyRows = data.rows.map(function (r, i) {
-    return trackerType === "budget"
+    return isBudget
       ? [i + 1, r.Name, r.Category, r.Type, r.Payment, r.Notes, r.Amount]
       : [i + 1, r.Week, r.Name, r.Category, r.Type, r.Payment, r.Notes, r.Amount];
   });
   const all = headerRows.concat(bodyRows);
 
   const ws = XLSX.utils.aoa_to_sheet(all);
-  ws["!cols"] = trackerType === "budget"
+  ws["!cols"] = isBudget
     ? [{ wch: 6 }, { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 14 }]
     : [{ wch: 6 }, { wch: 10 }, { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 14 }];
+
+  // ---- Styling (xlsx-js-style) ----
+  const FONT = "Times New Roman";
+  const thin = { style: "thin", color: { rgb: "D1D5DB" } };
+  const border = { top: thin, bottom: thin, left: thin, right: thin };
+
+  function style(r, c, s) {
+    const addr = XLSX.utils.encode_cell({ r: r, c: c });
+    if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+    ws[addr].s = s;
+  }
+
+  // Title — merged across all columns, indigo banner.
+  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: ncols - 1 } }];
+  style(0, 0, {
+    font: { name: FONT, sz: 16, bold: true, color: { rgb: "FFFFFF" } },
+    fill: { fgColor: { rgb: "6366F1" } },
+    alignment: { horizontal: "center", vertical: "center" }
+  });
+
+  // Summary rows (label bold on tint, value plain). Highlight the last (remaining).
+  for (let i = 0; i < summary.length; i++) {
+    const r = 1 + i;
+    const isLast = i === summary.length - 1;
+    style(r, 0, {
+      font: { name: FONT, bold: true, color: { rgb: isLast ? "FFFFFF" : "3730A3" } },
+      fill: { fgColor: { rgb: isLast ? "10B981" : "EEF2FF" } },
+      border: border
+    });
+    style(r, 1, {
+      font: { name: FONT, bold: isLast, color: { rgb: isLast ? "FFFFFF" : "1F2937" } },
+      fill: { fgColor: { rgb: isLast ? "10B981" : "FFFFFF" } },
+      border: border
+    });
+  }
+
+  // Column header row — indigo, white, centered, bordered.
+  for (let c = 0; c < ncols; c++) {
+    style(headerRowIdx, c, {
+      font: { name: FONT, bold: true, color: { rgb: "FFFFFF" } },
+      fill: { fgColor: { rgb: "6366F1" } },
+      alignment: { horizontal: "center" },
+      border: border
+    });
+  }
+
+  // Body rows — Times font, zebra striping, amount right-aligned & bold.
+  for (let i = 0; i < bodyRows.length; i++) {
+    const r = headerRowIdx + 1 + i;
+    const zebra = i % 2 === 1;
+    for (let c = 0; c < ncols; c++) {
+      style(r, c, {
+        font: { name: FONT, bold: c === ncols - 1, color: { rgb: "1F2937" } },
+        fill: { fgColor: { rgb: zebra ? "F3F4FF" : "FFFFFF" } },
+        alignment: { horizontal: c === 0 ? "center" : (c === ncols - 1 ? "right" : "left") },
+        border: border
+      });
+    }
+  }
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Expenses");
