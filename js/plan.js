@@ -22,6 +22,9 @@ let monthId = null;
 let monthName = "";
 let monthCurrentBalance = 0;
 let monthSpent = 0;
+let planPlanned = 0;   // sum of all plan rows' planned amounts
+let planSpent = 0;     // sum of done rows' actual amounts
+let planPending = 0;   // sum of pending rows' planned amounts
 let plansRef = null;
 let expensesRef = null;
 let currentPlans = []; // latest plan docs [{ id, ...data }]
@@ -107,10 +110,28 @@ async function loadPlan() {
 
 function renderFigures() {
   document.getElementById("pf-balance").textContent = formatMoney(monthCurrentBalance);
+
   const remaining = monthCurrentBalance - monthSpent;
-  const el = document.getElementById("pf-remaining");
-  el.textContent = formatMoney(remaining);
-  el.style.color = remaining < 0 ? "var(--danger)" : "var(--success)";
+  const remEl = document.getElementById("pf-remaining");
+  remEl.textContent = formatMoney(remaining);
+  remEl.style.color = remaining < 0 ? "var(--danger)" : "var(--success)";
+
+  // "After plans" = what's left once every still-pending plan is paid.
+  // Done plans are already reflected in `remaining` (they created expenses),
+  // so only the pending planned amounts are subtracted here.
+  const afterPlans = remaining - planPending;
+  const apEl = document.getElementById("pf-afterplans");
+  if (apEl) {
+    apEl.textContent = formatMoney(afterPlans);
+    apEl.style.color = afterPlans < 0 ? "var(--danger)" : "var(--success)";
+  }
+
+  const plannedEl = document.getElementById("pf-planned");
+  if (plannedEl) plannedEl.textContent = formatMoney(planPlanned);
+  const spentEl = document.getElementById("pf-spent");
+  if (spentEl) spentEl.textContent = formatMoney(planSpent);
+  const pendEl = document.getElementById("pf-pending");
+  if (pendEl) pendEl.textContent = formatMoney(planPending);
 }
 
 function renderRows() {
@@ -119,6 +140,7 @@ function renderRows() {
 
   let totalPlanned = 0;
   let totalSpent = 0;
+  let totalPending = 0;
 
   currentPlans.forEach(function (p) {
     const isDone = p.status === "done";
@@ -127,6 +149,7 @@ function renderRows() {
     const actual = Number(p.actual) || 0;
     totalPlanned += planned;
     if (isDone) totalSpent += actual;
+    else totalPending += planned;
 
     const transferTag = p.transferredFrom
       ? ' <span class="plan-from-tag">↪ ' + escapeHtmlPlan(p.transferredFrom) + '</span>'
@@ -167,11 +190,13 @@ function renderRows() {
     tbody.appendChild(tr);
   });
 
-  // Totals under the figures: total planned across all rows, total actually spent (done).
-  const plannedEl = document.getElementById("pf-planned");
-  if (plannedEl) plannedEl.textContent = formatMoney(totalPlanned);
-  const spentEl = document.getElementById("pf-spent");
-  if (spentEl) spentEl.textContent = formatMoney(totalSpent);
+  // Stash the plan totals and refresh the figures (incl. "After plans"). This runs
+  // on every plans snapshot — so after a transfer adds/removes rows here, the
+  // pending total and "After plans" recalculate automatically.
+  planPlanned = totalPlanned;
+  planSpent = totalSpent;
+  planPending = totalPending;
+  renderFigures();
 
   tbody.querySelectorAll("[data-done]").forEach(function (b) {
     b.addEventListener("click", function () { markPlanRowDone(b.dataset.done); });
@@ -204,6 +229,20 @@ async function addPlan() {
   const planned = Number(amtInput.value);
   if (!name) return showToast("Enter a plan name.", "error");
   if (!planned || planned <= 0) return showToast("Enter a valid amount.", "error");
+
+  // Warn if planning this would push the after-plans balance below zero.
+  const remaining = monthCurrentBalance - monthSpent;
+  const afterPlans = remaining - (planPending + planned);
+  if (afterPlans < 0) {
+    const ok = await showConfirm({
+      title: "Plans exceed balance",
+      message: "Adding this makes your pending plans " + formatMoney(-afterPlans) +
+        " more than your balance (" + formatMoney(remaining) + "). Add it anyway?",
+      confirmText: "Add anyway",
+      danger: true
+    });
+    if (!ok) return;
+  }
 
   await plansRef.add({
     name: name,
@@ -280,6 +319,19 @@ function markPlanRowDone(id) {
     const category = backdrop.querySelector("#done-cat").value;
     const paymentMethod = backdrop.querySelector("#done-pay").value;
     cleanup();
+
+    // Warn if paying this goes past what's left in the month.
+    const remaining = monthCurrentBalance - monthSpent;
+    if (actual > remaining) {
+      const ok = await showConfirm({
+        title: "Over your balance",
+        message: "Paying " + formatMoney(actual) + " is " + formatMoney(actual - remaining) +
+          " more than what's left (" + formatMoney(remaining) + "). Record it anyway?",
+        confirmText: "Record anyway",
+        danger: true
+      });
+      if (!ok) return;
+    }
 
     // 1) Real expense in this month (same shape as month.js expenses).
     const expRef = await expensesRef.add({

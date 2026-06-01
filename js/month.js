@@ -634,6 +634,21 @@ async function addExpense(type) {
   if (!name) return showToast("Enter an expense name.", "error");
   if (!amount || amount <= 0) return showToast("Enter a valid amount.", "error");
 
+  // Warn if a spend goes past what's left (months: currentBalance − spent; budgets: amount − spent).
+  if (type === "minus") {
+    const remaining = (trackerType === "budget" ? userSalary : monthCurrentBalance) - monthSpent;
+    if (amount > remaining) {
+      const ok = await showConfirm({
+        title: "Over your balance",
+        message: "This spend of " + formatMoney(amount) + " is " + formatMoney(amount - remaining) +
+          " more than what's left (" + formatMoney(remaining) + "). Add it anyway?",
+        confirmText: "Add anyway",
+        danger: true
+      });
+      if (!ok) return;
+    }
+  }
+
   const payload = {
     name: name,
     amount: amount,
