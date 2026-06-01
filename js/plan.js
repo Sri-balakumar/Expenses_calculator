@@ -1,6 +1,9 @@
-// Plan page: a forecast ledger. Start balance, then items that subtract from it.
-// Each item can be marked "Done" — you enter the real amount, pick a month + category,
-// and it pushes a real expense into that month while showing the planned-vs-actual diff.
+// Month-scoped plans. A "plan" is a planned spend row under a month:
+//   users/{uid}/months/{monthId}/plans/{planId}
+// The page shows the month's Current balance + Total remaining (= current balance
+// − spent, computed from the month's expenses), a table of plan rows with an inline
+// add row, a Done flow that records a real expense in this month, and a Transfer
+// flow that moves PENDING plans to another month (done plans never transfer).
 
 const PLAN_CATEGORIES = {
   food:          { label: "Food",       emoji: "🍔" },
@@ -15,310 +18,250 @@ const PLAN_CATEGORIES = {
 const PLAN_DEFAULT_CATEGORY = "other";
 
 let planUserId = null;
-let planId = null;
-let planName = "";
-let planStartBalance = 0;
-let planRef = null;
-let itemsRef = null;
+let monthId = null;
+let monthName = "";
+let monthCurrentBalance = 0;
+let monthSpent = 0;
+let plansRef = null;
+let expensesRef = null;
+let currentPlans = []; // latest plan docs [{ id, ...data }]
 
-function planParams() {
-  const params = new URLSearchParams(window.location.search);
-  return { id: params.get("id") };
+function planMonthIdFromUrl() {
+  return new URLSearchParams(window.location.search).get("month");
 }
 
-function escapeHtmlPlan(s) {
-  const d = document.createElement("div");
-  d.textContent = s == null ? "" : s;
-  return d.innerHTML;
+function escapeHtmlPlan(str) {
+  const div = document.createElement("div");
+  div.textContent = str == null ? "" : str;
+  return div.innerHTML;
 }
 
 async function loadPlan() {
+  monthId = planMonthIdFromUrl();
+  if (!monthId) return window.location.replace("dashboard.html");
+
   const user = await waitForAuth();
-  if (!user) return (window.location.href = "index.html");
-  if (typeof isAdmin === "function" && isAdmin(user)) return (window.location.href = "admin.html");
+  if (!user) return window.location.replace("index.html");
+  if (typeof isAdmin === "function" && isAdmin(user)) return window.location.replace("admin.html");
   planUserId = user.uid;
 
-  planId = planParams().id;
-  if (!planId) return (window.location.href = "dashboard.html");
-
-  planRef = db.collection("users").doc(planUserId).collection("plans").doc(planId);
-  itemsRef = planRef.collection("items");
-
-  const planDoc = await planRef.get();
-  if (!planDoc.exists) {
-    showToast("Plan not found.", "error");
-    return (window.location.href = "dashboard.html");
+  const monthDoc = await db.collection("users").doc(planUserId)
+    .collection("months").doc(monthId).get();
+  if (!monthDoc.exists) {
+    showToast("Month not found.", "error");
+    setTimeout(function () { window.location.replace("dashboard.html"); }, 800);
+    return;
   }
 
-  const data = planDoc.data();
-  planName = data.name || "Plan";
-  planStartBalance = Number(data.startBalance) || 0;
+  const data = monthDoc.data();
+  monthName = data.name || "Plan";
+  monthCurrentBalance = Number(data.currentBalance) || 0;
+  document.getElementById("plan-month-name").textContent = monthName;
 
-  document.getElementById("plan-name").textContent = planName;
   document.getElementById("loading-card").classList.add("hidden");
-  document.getElementById("plan-summary-card").classList.remove("hidden");
-  document.getElementById("plan-body").classList.remove("hidden");
+  document.getElementById("plan-figures").classList.remove("hidden");
+  document.getElementById("plan-table-card").classList.remove("hidden");
 
-  document.getElementById("add-item-btn").addEventListener("click", openAddItem);
-  document.getElementById("edit-start-btn").addEventListener("click", editStartBalance);
+  // Populate the add-row category select once.
+  const catSel = document.getElementById("add-cat");
+  catSel.innerHTML = Object.keys(PLAN_CATEGORIES).map(function (k) {
+    const c = PLAN_CATEGORIES[k];
+    return '<option value="' + k + '"' + (k === PLAN_DEFAULT_CATEGORY ? " selected" : "") +
+      '>' + c.emoji + " " + c.label + '</option>';
+  }).join("");
 
-  // Live ledger
-  itemsRef.orderBy("createdAt", "asc").onSnapshot(function (snap) {
-    renderItems(snap);
+  document.getElementById("add-plan-btn").addEventListener("click", addPlan);
+  document.getElementById("add-name").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") addPlan();
+  });
+  document.getElementById("add-amount").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") addPlan();
+  });
+  document.getElementById("transfer-all-btn").addEventListener("click", function () {
+    transferPlans(null); // null = all pending
+  });
+
+  expensesRef = db.collection("users").doc(planUserId).collection("months").doc(monthId).collection("expenses");
+  plansRef = db.collection("users").doc(planUserId).collection("months").doc(monthId).collection("plans");
+
+  // Live figures from the month's expenses.
+  expensesRef.onSnapshot(function (snap) {
+    let spent = 0;
+    snap.forEach(function (d) {
+      const e = d.data();
+      const amt = Number(e.amount) || 0;
+      spent += e.type === "plus" ? -amt : amt;
+    });
+    monthSpent = spent;
+    renderFigures();
+  });
+
+  // Live plan rows.
+  plansRef.orderBy("createdAt", "asc").onSnapshot(function (snap) {
+    currentPlans = snap.docs.map(function (d) {
+      return Object.assign({ id: d.id }, d.data());
+    });
+    renderRows();
   });
 }
 
-function renderItems(snap) {
-  const listEl = document.getElementById("plan-items");
-  const emptyEl = document.getElementById("plan-items-empty");
-  listEl.innerHTML = "";
+function renderFigures() {
+  document.getElementById("pf-balance").textContent = formatMoney(monthCurrentBalance);
+  const remaining = monthCurrentBalance - monthSpent;
+  const el = document.getElementById("pf-remaining");
+  el.textContent = formatMoney(remaining);
+  el.style.color = remaining < 0 ? "var(--danger)" : "var(--success)";
+}
 
-  if (snap.empty) {
-    emptyEl.classList.remove("hidden");
-    updateSummary(planStartBalance, 0);
-    return;
-  }
-  emptyEl.classList.add("hidden");
+function renderRows() {
+  const tbody = document.getElementById("plan-rows");
+  tbody.innerHTML = "";
 
-  let running = planStartBalance;
-  let totalDiff = 0;
+  let totalPlanned = 0;
+  let totalSpent = 0;
 
-  snap.forEach(function (docSnap) {
-    const item = docSnap.data();
-    const id = docSnap.id;
-    const planned = Number(item.planned) || 0;
-    const isDone = item.status === "done";
-    const actual = Number(item.actual) || 0;
-    const effective = isDone ? actual : planned;
+  currentPlans.forEach(function (p) {
+    const isDone = p.status === "done";
+    const cat = PLAN_CATEGORIES[p.category] || PLAN_CATEGORIES.other;
+    const planned = Number(p.planned) || 0;
+    const actual = Number(p.actual) || 0;
+    totalPlanned += planned;
+    if (isDone) totalSpent += actual;
 
-    running -= effective;
+    const transferTag = p.transferredFrom
+      ? ' <span class="plan-from-tag">↪ ' + escapeHtmlPlan(p.transferredFrom) + '</span>'
+      : '';
 
-    let diffBadge = "";
+    // Amount cell: pending shows planned; done shows planned → paid + the extra/saved.
+    let amountCell;
     if (isDone) {
-      const diff = actual - planned;
-      totalDiff += diff;
-      if (diff > 0) {
-        diffBadge = '<span class="diff-badge diff-over">+' + formatMoney(diff) + '</span>';
-      } else if (diff < 0) {
-        diffBadge = '<span class="diff-badge diff-saved">−' + formatMoney(Math.abs(diff)) + '</span>';
-      } else {
-        diffBadge = '<span class="diff-badge diff-exact">on plan</span>';
-      }
+      const diff = actual - planned; // + = paid more than planned
+      let badge = "";
+      if (diff > 0) badge = ' <span class="plan-diff over">+' + formatMoney(diff) + '</span>';
+      else if (diff < 0) badge = ' <span class="plan-diff under">−' + formatMoney(Math.abs(diff)) + '</span>';
+      amountCell = '<span class="plan-amt-planned">' + formatMoney(planned) + '</span>' +
+        ' <span class="plan-amt-arrow">→</span> <strong>' + formatMoney(actual) + '</strong>' + badge;
+    } else {
+      amountCell = formatMoney(planned);
     }
 
-    const row = document.createElement("div");
-    row.className = "plan-row" + (isDone ? " is-done" : "");
-
-    const monthTag = (isDone && item.pushedTo && item.pushedTo.monthName)
-      ? '<span class="plan-month-tag">→ ' + escapeHtmlPlan(item.pushedTo.monthName) + '</span>'
-      : "";
-
-    const costLine = isDone
-      ? '<span class="plan-actual">Spent ' + formatMoney(actual) + '</span> ' +
-        '<span class="plan-planned-muted">(planned ' + formatMoney(planned) + ')</span> ' + diffBadge
-      : '<span class="plan-planned">Planned ' + formatMoney(planned) + '</span>';
-
-    const actionBtn = isDone
+    const statusCell = isDone
       ? '<span class="plan-done-chip">✓ Done</span>'
-      : '<button class="plan-done-btn" data-done="' + id + '">' +
-          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' +
-          'Done' +
-        '</button>';
+      : '<span class="plan-pending-chip">Pending</span>';
 
-    row.innerHTML =
-      '<div class="plan-row-top">' +
-        '<div class="plan-row-name">' + escapeHtmlPlan(item.name) + ' ' + monthTag + '</div>' +
-        '<div class="plan-running">' + formatMoney(running) + '</div>' +
-      '</div>' +
-      '<div class="plan-row-bottom">' +
-        '<div class="plan-row-cost">' + costLine + '</div>' +
-        '<div class="plan-row-actions">' +
-          actionBtn +
-          '<button class="btn-icon-only" data-edit="' + id + '" title="Edit">' +
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
-          '</button>' +
-          '<button class="btn-icon-only" data-del="' + id + '" title="Delete">' +
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>' +
-          '</button>' +
-        '</div>' +
-      '</div>';
+    const actions = isDone
+      ? '<button class="plan-mini-btn" data-undo="' + p.id + '">Undo</button>' +
+        '<button class="plan-mini-btn danger" data-del="' + p.id + '">Delete</button>'
+      : '<button class="plan-mini-btn primary" data-done="' + p.id + '">Done</button>' +
+        '<button class="plan-mini-btn" data-transfer="' + p.id + '">Transfer</button>' +
+        '<button class="plan-mini-btn danger" data-del="' + p.id + '">Delete</button>';
 
-    listEl.appendChild(row);
+    const tr = document.createElement("tr");
+    if (isDone) tr.className = "plan-row-done";
+    tr.innerHTML =
+      '<td>' + escapeHtmlPlan(p.name) + transferTag + '</td>' +
+      '<td>' + amountCell + '</td>' +
+      '<td>' + cat.emoji + ' ' + cat.label + '</td>' +
+      '<td>' + statusCell + '</td>' +
+      '<td><div class="plan-row-actions">' + actions + '</div></td>';
+    tbody.appendChild(tr);
   });
 
-  // Wire row actions
-  listEl.querySelectorAll("[data-done]").forEach(function (btn) {
-    btn.addEventListener("click", function () { markItemDone(btn.dataset.done); });
-  });
-  listEl.querySelectorAll("[data-edit]").forEach(function (btn) {
-    btn.addEventListener("click", function () { editItem(btn.dataset.edit); });
-  });
-  listEl.querySelectorAll("[data-del]").forEach(function (btn) {
-    btn.addEventListener("click", function () { deleteItem(btn.dataset.del); });
-  });
+  // Totals under the figures: total planned across all rows, total actually spent (done).
+  const plannedEl = document.getElementById("pf-planned");
+  if (plannedEl) plannedEl.textContent = formatMoney(totalPlanned);
+  const spentEl = document.getElementById("pf-spent");
+  if (spentEl) spentEl.textContent = formatMoney(totalSpent);
 
-  updateSummary(running, totalDiff);
+  tbody.querySelectorAll("[data-done]").forEach(function (b) {
+    b.addEventListener("click", function () { markPlanRowDone(b.dataset.done); });
+  });
+  tbody.querySelectorAll("[data-undo]").forEach(function (b) {
+    b.addEventListener("click", function () { undoPlanRow(b.dataset.undo); });
+  });
+  tbody.querySelectorAll("[data-del]").forEach(function (b) {
+    b.addEventListener("click", function () { deletePlanRow(b.dataset.del); });
+  });
+  tbody.querySelectorAll("[data-transfer]").forEach(function (b) {
+    b.addEventListener("click", function () { transferPlans([b.dataset.transfer]); });
+  });
 }
 
-function updateSummary(remaining, totalDiff) {
-  document.getElementById("sum-start").textContent = formatMoney(planStartBalance);
-
-  const remEl = document.getElementById("sum-remaining");
-  remEl.textContent = formatMoney(remaining);
-  remEl.style.color = remaining < 0 ? "var(--danger)" : "var(--success)";
-
-  const diffEl = document.getElementById("sum-diff");
-  if (totalDiff > 0) {
-    diffEl.textContent = "+" + formatMoney(totalDiff);
-    diffEl.style.color = "var(--danger)";
-  } else if (totalDiff < 0) {
-    diffEl.textContent = "−" + formatMoney(Math.abs(totalDiff));
-    diffEl.style.color = "var(--success)";
-  } else {
-    diffEl.textContent = "₹0";
-    diffEl.style.color = "var(--text-muted)";
+function planById(id) {
+  for (let i = 0; i < currentPlans.length; i++) {
+    if (currentPlans[i].id === id) return currentPlans[i];
   }
+  return null;
 }
 
-// ============================================================
-// Add / edit / delete items
-// ============================================================
+// ---- Add a plan row ----
+async function addPlan() {
+  const nameInput = document.getElementById("add-name");
+  const amtInput = document.getElementById("add-amount");
+  const catSel = document.getElementById("add-cat");
 
-function openAddItem() {
-  itemModal({ title: "Add item", name: "", planned: "" }, async function (name, planned) {
-    await itemsRef.add({
-      name: name,
-      planned: planned,
-      status: "pending",
-      actual: null,
-      pushedTo: null,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    showToast("Item added: " + name, "success");
+  const name = nameInput.value.trim();
+  const planned = Number(amtInput.value);
+  if (!name) return showToast("Enter a plan name.", "error");
+  if (!planned || planned <= 0) return showToast("Enter a valid amount.", "error");
+
+  await plansRef.add({
+    name: name,
+    planned: planned,
+    category: catSel.value || PLAN_DEFAULT_CATEGORY,
+    status: "pending",
+    actual: null,
+    pushedExpenseId: null,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
   });
+
+  nameInput.value = "";
+  amtInput.value = "";
+  catSel.value = PLAN_DEFAULT_CATEGORY;
+  nameInput.focus();
 }
 
-async function editItem(id) {
-  const doc = await itemsRef.doc(id).get();
-  if (!doc.exists) return;
-  const item = doc.data();
-  itemModal({ title: "Edit item", name: item.name, planned: item.planned }, async function (name, planned) {
-    await itemsRef.doc(id).update({ name: name, planned: planned });
-    showToast("Item updated", "success");
-  });
-}
-
-function itemModal(opts, onSave) {
-  const backdrop = document.createElement("div");
-  backdrop.className = "modal-backdrop";
-  backdrop.innerHTML =
-    '<div class="modal-card">' +
-      '<h3>' + escapeHtmlPlan(opts.title) + '</h3>' +
-      '<div class="add-expense-form">' +
-        '<div class="form-group">' +
-          '<label for="item-name-input">Name</label>' +
-          '<input type="text" id="item-name-input" placeholder="e.g. Recharge">' +
-        '</div>' +
-        '<div class="form-group">' +
-          '<label for="item-planned-input">Planned cost (₹)</label>' +
-          '<input type="number" id="item-planned-input" placeholder="e.g. 900" min="0">' +
-        '</div>' +
-      '</div>' +
-      '<div class="modal-actions">' +
-        '<button class="btn-secondary" data-act="cancel">Cancel</button>' +
-        '<button class="btn-primary" data-act="ok">Save</button>' +
-      '</div>' +
-    '</div>';
-
-  function cleanup() { if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop); }
-  backdrop.querySelector('[data-act="cancel"]').addEventListener("click", cleanup);
-  backdrop.addEventListener("click", function (e) { if (e.target === backdrop) cleanup(); });
-
-  backdrop.querySelector("#item-name-input").value = opts.name || "";
-  backdrop.querySelector("#item-planned-input").value = (opts.planned === 0 || opts.planned) ? opts.planned : "";
-
-  backdrop.querySelector('[data-act="ok"]').addEventListener("click", async function () {
-    const name = backdrop.querySelector("#item-name-input").value.trim();
-    const planned = Number(backdrop.querySelector("#item-planned-input").value);
-    if (!name) return showToast("Enter a name.", "error");
-    if (!planned || planned <= 0) return showToast("Enter a valid planned cost.", "error");
-    cleanup();
-    await onSave(name, planned);
-  });
-
-  document.body.appendChild(backdrop);
-  setTimeout(function () { backdrop.querySelector("#item-name-input").focus(); }, 50);
-}
-
-async function deleteItem(id) {
-  const doc = await itemsRef.doc(id).get();
-  const item = doc.exists ? doc.data() : {};
-  const wasDone = item.status === "done";
-  const ok = await showConfirm({
-    title: "Delete item?",
-    message: wasDone
-      ? "This removes it from the plan. The expense already recorded in the month will stay."
-      : "This planned item will be removed.",
-    confirmText: "Delete"
-  });
-  if (!ok) return;
-  await itemsRef.doc(id).delete();
-  showToast("Item removed", "success");
-}
-
-// ============================================================
-// Done flow — enter actual amount, pick month + category, push to month
-// ============================================================
-
-async function markItemDone(id) {
-  const doc = await itemsRef.doc(id).get();
-  if (!doc.exists) return;
-  const item = doc.data();
-  const planned = Number(item.planned) || 0;
-
-  // Load the user's months for the dropdown
-  const monthsSnap = await db.collection("users").doc(planUserId)
-    .collection("months").orderBy("createdAt", "desc").get();
-
-  if (monthsSnap.empty) {
-    showToast("Create a month first (Monthly tab) to record this spend.", "error", 3500);
-    return;
-  }
-
-  let monthOptions = "";
-  monthsSnap.forEach(function (m) {
-    monthOptions += '<option value="' + m.id + '">' + escapeHtmlPlan(m.data().name) + '</option>';
-  });
+// ---- Mark a plan done → record a real expense in THIS month ----
+function markPlanRowDone(id) {
+  const p = planById(id);
+  if (!p) return;
+  const planned = Number(p.planned) || 0;
 
   let catOptions = "";
-  Object.keys(PLAN_CATEGORIES).forEach(function (key) {
-    const c = PLAN_CATEGORIES[key];
-    catOptions += '<option value="' + key + '"' + (key === PLAN_DEFAULT_CATEGORY ? " selected" : "") +
-      '>' + c.emoji + " " + c.label + '</option>';
+  Object.keys(PLAN_CATEGORIES).forEach(function (k) {
+    const c = PLAN_CATEGORIES[k];
+    const selected = k === (p.category || PLAN_DEFAULT_CATEGORY) ? " selected" : "";
+    catOptions += '<option value="' + k + '"' + selected + '>' + c.emoji + " " + c.label + '</option>';
+  });
+
+  const PAYS = { gpay: "📱 GPay", phonepe: "💜 PhonePe", paytm: "🅿️ Paytm", cash: "💵 Cash", card: "💳 Card", other: "❓ Other" };
+  let payOptions = "";
+  Object.keys(PAYS).forEach(function (k) {
+    payOptions += '<option value="' + k + '"' + (k === "cash" ? " selected" : "") + '>' + PAYS[k] + '</option>';
   });
 
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
   backdrop.innerHTML =
     '<div class="modal-card">' +
-      '<h3>Mark "' + escapeHtmlPlan(item.name) + '" done</h3>' +
+      '<h3>Mark "' + escapeHtmlPlan(p.name) + '" done</h3>' +
       '<div class="add-expense-form">' +
         '<div class="form-group">' +
-          '<label for="actual-input">Actual amount spent (₹)</label>' +
-          '<input type="number" id="actual-input" min="0">' +
+          '<label for="done-actual">Actual amount spent (₹)</label>' +
+          '<input type="number" id="done-actual" min="0">' +
         '</div>' +
         '<div class="form-group">' +
-          '<label for="month-select">Add to month</label>' +
-          '<select id="month-select" class="plan-select">' + monthOptions + '</select>' +
+          '<label for="done-cat">Category</label>' +
+          '<select id="done-cat" class="plan-select">' + catOptions + '</select>' +
         '</div>' +
         '<div class="form-group">' +
-          '<label for="cat-select">Category</label>' +
-          '<select id="cat-select" class="plan-select">' + catOptions + '</select>' +
+          '<label for="done-pay">Payment method</label>' +
+          '<select id="done-pay" class="plan-select">' + payOptions + '</select>' +
         '</div>' +
       '</div>' +
       '<div class="modal-actions">' +
         '<button class="btn-secondary" data-act="cancel">Cancel</button>' +
-        '<button class="btn-primary" data-act="ok">Confirm</button>' +
+        '<button class="btn-primary" data-act="ok">Mark done</button>' +
       '</div>' +
     '</div>';
 
@@ -326,69 +269,129 @@ async function markItemDone(id) {
   backdrop.querySelector('[data-act="cancel"]').addEventListener("click", cleanup);
   backdrop.addEventListener("click", function (e) { if (e.target === backdrop) cleanup(); });
 
-  backdrop.querySelector("#actual-input").value = planned;
+  const actualInput = backdrop.querySelector("#done-actual");
+  actualInput.value = planned;
 
   backdrop.querySelector('[data-act="ok"]').addEventListener("click", async function () {
-    const actual = Number(backdrop.querySelector("#actual-input").value);
-    const monthSel = backdrop.querySelector("#month-select");
-    const monthId = monthSel.value;
-    const monthName = monthSel.options[monthSel.selectedIndex].textContent;
-    const category = backdrop.querySelector("#cat-select").value;
-
-    if (!actual || actual <= 0) return showToast("Enter a valid amount.", "error");
-    if (!monthId) return showToast("Pick a month.", "error");
-
+    const actual = Number(actualInput.value);
+    if (actualInput.value === "" || isNaN(actual) || actual < 0) {
+      return showToast("Enter a valid amount.", "error");
+    }
+    const category = backdrop.querySelector("#done-cat").value;
+    const paymentMethod = backdrop.querySelector("#done-pay").value;
     cleanup();
 
-    // 1) Record the real expense in the chosen month (same shape as month.js addExpense)
-    await db.collection("users").doc(planUserId)
-      .collection("months").doc(monthId).collection("expenses").add({
-        name: item.name,
-        amount: actual,
-        type: "minus",
-        category: category,
-        paymentMethod: "cash",
-        notes: "From plan: " + planName,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-
-    // 2) Mark the plan item done with the actual + where it went
-    await itemsRef.doc(id).update({
-      status: "done",
-      actual: actual,
-      pushedTo: { monthId: monthId, monthName: monthName, category: category }
+    // 1) Real expense in this month (same shape as month.js expenses).
+    const expRef = await expensesRef.add({
+      name: p.name,
+      amount: actual,
+      type: "minus",
+      category: category,
+      paymentMethod: paymentMethod,
+      notes: "From plan: " + monthName,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
 
-    const diff = actual - planned;
-    let msg = item.name + " done — added to " + monthName;
-    if (diff > 0) msg += " (+" + formatMoney(diff) + " over)";
-    else if (diff < 0) msg += " (saved " + formatMoney(Math.abs(diff)) + ")";
+    // 2) Mark the plan done.
+    await plansRef.doc(id).update({
+      status: "done",
+      actual: actual,
+      category: category,
+      pushedExpenseId: expRef.id
+    });
+
+    const diff = planned - actual;
+    let msg = p.name + " done — " + formatMoney(actual) + " recorded";
+    if (diff > 0) msg += " (saved " + formatMoney(diff) + ")";
+    else if (diff < 0) msg += " (over by " + formatMoney(Math.abs(diff)) + ")";
     showToast(msg, "success", 3000);
   });
 
   document.body.appendChild(backdrop);
-  setTimeout(function () { backdrop.querySelector("#actual-input").focus(); }, 50);
+  setTimeout(function () { actualInput.focus(); actualInput.select(); }, 50);
 }
 
-// ============================================================
-// Edit starting balance
-// ============================================================
+// ---- Undo a done plan → remove its expense, back to pending ----
+async function undoPlanRow(id) {
+  const p = planById(id);
+  if (!p) return;
+  if (p.pushedExpenseId) {
+    await expensesRef.doc(p.pushedExpenseId).delete().catch(function () {});
+  }
+  await plansRef.doc(id).update({
+    status: "pending",
+    actual: null,
+    pushedExpenseId: null
+  });
+  showToast("Plan reopened — expense removed from " + monthName + ".", "success", 3000);
+}
 
-function editStartBalance() {
+// ---- Delete a plan (and its expense if it was done) ----
+async function deletePlanRow(id) {
+  const p = planById(id);
+  if (!p) return;
+  const wasDone = p.status === "done";
+  const ok = await showConfirm({
+    title: 'Delete "' + p.name + '"?',
+    message: wasDone
+      ? "This also removes the expense it recorded in " + monthName + "."
+      : "This removes the plan.",
+    confirmText: "Delete",
+    danger: true
+  });
+  if (!ok) return;
+
+  if (wasDone && p.pushedExpenseId) {
+    await expensesRef.doc(p.pushedExpenseId).delete().catch(function () {});
+  }
+  await plansRef.doc(id).delete();
+  showToast("Plan deleted.", "success");
+}
+
+// ---- Transfer pending plans to another month ----
+// ids: array of plan ids to move, or null for "all pending".
+async function transferPlans(ids) {
+  // Resolve which plans to move (pending only — done never transfers).
+  let toMove;
+  if (ids) {
+    toMove = ids.map(planById).filter(function (p) { return p && p.status !== "done"; });
+  } else {
+    toMove = currentPlans.filter(function (p) { return p.status !== "done"; });
+  }
+  if (!toMove.length) {
+    showToast("No pending plans to transfer.", "error");
+    return;
+  }
+
+  // Other months for the destination dropdown.
+  const monthsSnap = await db.collection("users").doc(planUserId)
+    .collection("months").orderBy("createdAt", "desc").get();
+  const others = monthsSnap.docs.filter(function (d) { return d.id !== monthId; });
+  if (!others.length) {
+    showToast("Create another month first to transfer into.", "error", 3500);
+    return;
+  }
+
+  let monthOptions = "";
+  others.forEach(function (m) {
+    monthOptions += '<option value="' + m.id + '">' + escapeHtmlPlan(m.data().name) + '</option>';
+  });
+
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
   backdrop.innerHTML =
     '<div class="modal-card">' +
-      '<h3>Edit starting balance</h3>' +
+      '<h3>Transfer ' + toMove.length + ' pending plan' + (toMove.length > 1 ? "s" : "") + '</h3>' +
       '<div class="add-expense-form">' +
         '<div class="form-group">' +
-          '<label for="start-input">Starting balance (₹)</label>' +
-          '<input type="number" id="start-input" min="0">' +
+          '<label for="transfer-month">Move to month</label>' +
+          '<select id="transfer-month" class="plan-select">' + monthOptions + '</select>' +
+          '<p style="margin:6px 0 0;font-size:0.8rem;color:var(--text-muted);">Done plans stay here. Only pending plans move.</p>' +
         '</div>' +
       '</div>' +
       '<div class="modal-actions">' +
         '<button class="btn-secondary" data-act="cancel">Cancel</button>' +
-        '<button class="btn-primary" data-act="ok">Save</button>' +
+        '<button class="btn-primary" data-act="ok">Transfer</button>' +
       '</div>' +
     '</div>';
 
@@ -396,20 +399,37 @@ function editStartBalance() {
   backdrop.querySelector('[data-act="cancel"]').addEventListener("click", cleanup);
   backdrop.addEventListener("click", function (e) { if (e.target === backdrop) cleanup(); });
 
-  backdrop.querySelector("#start-input").value = planStartBalance;
-
   backdrop.querySelector('[data-act="ok"]').addEventListener("click", async function () {
-    const value = Number(backdrop.querySelector("#start-input").value);
-    if (!value || value <= 0) return showToast("Enter a valid balance.", "error");
-    planStartBalance = value;
-    await planRef.update({ startBalance: value });
+    const sel = backdrop.querySelector("#transfer-month");
+    const targetId = sel.value;
+    const targetName = sel.options[sel.selectedIndex].textContent;
+    if (!targetId) return showToast("Pick a month.", "error");
     cleanup();
-    showToast("Starting balance updated", "success");
-    // Re-render with the latest items
-    const snap = await itemsRef.orderBy("createdAt", "asc").get();
-    renderItems(snap);
+
+    const targetPlans = db.collection("users").doc(planUserId)
+      .collection("months").doc(targetId).collection("plans");
+
+    // Batched move: create in target, delete from source. No money moves
+    // (pending plans carry none), so no balance recalculation is needed.
+    const batch = db.batch();
+    toMove.forEach(function (p) {
+      const newRef = targetPlans.doc();
+      batch.set(newRef, {
+        name: p.name,
+        planned: Number(p.planned) || 0,
+        category: p.category || PLAN_DEFAULT_CATEGORY,
+        status: "pending",
+        actual: null,
+        pushedExpenseId: null,
+        transferredFrom: monthName,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      batch.delete(plansRef.doc(p.id));
+    });
+    await batch.commit();
+
+    showToast(toMove.length + " plan" + (toMove.length > 1 ? "s" : "") + " moved to " + targetName + ".", "success", 3000);
   });
 
   document.body.appendChild(backdrop);
-  setTimeout(function () { backdrop.querySelector("#start-input").focus(); }, 50);
 }

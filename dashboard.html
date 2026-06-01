@@ -116,21 +116,16 @@
 
     <!-- PLANS VIEW -->
     <div id="plans-view" class="hidden">
-      <button class="btn-primary" id="new-plan-btn" style="margin-bottom: 24px;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        New Plan
-      </button>
-
-      <h2>Your Plans</h2>
+      <h2>Plan by month</h2>
       <p class="muted" style="margin-top:-8px;margin-bottom:14px;font-size:0.88rem;">
-        Forecast future spends from a starting balance, then mark each Done to record the real cost.
+        Pick a month to plan its spends. Mark a plan done to record the real cost, or transfer pending plans to another month.
       </p>
       <div id="plans-list"></div>
       <div id="plans-empty" class="empty-state hidden">
         <div class="empty-state-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
         </div>
-        <p>No plans yet. Tap <strong>+ New Plan</strong> to start forecasting.</p>
+        <p>No months yet. Create a month in the <strong>Monthly</strong> tab first.</p>
       </div>
     </div>
 
@@ -151,7 +146,6 @@
   <script>
     document.getElementById("new-month-btn").addEventListener("click", createNewMonth);
     document.getElementById("new-budget-btn").addEventListener("click", createNewBudget);
-    document.getElementById("new-plan-btn").addEventListener("click", createNewPlan);
     document.getElementById("logout-btn").addEventListener("click", signOutUser);
     document.getElementById("tab-monthly").addEventListener("click", function () { switchDashTab("monthly"); });
     document.getElementById("tab-budgets").addEventListener("click", function () { switchDashTab("budgets"); });

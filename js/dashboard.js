@@ -62,7 +62,11 @@ async function loadDashboard() {
   document.getElementById("greeting").textContent = "Hi, " + data.name;
   document.getElementById("salary").innerHTML = "Monthly salary: <strong>" + formatMoney(userSalary) + "</strong>";
 
-  await Promise.all([renderMonths(), renderBudgets(), renderPlans()]);
+  // Fetch months (+ their expenses) once and share with both the Monthly and
+  // Plans tabs; run budgets in parallel.
+  const [monthsData] = await Promise.all([fetchMonthsData(), renderBudgets()]);
+  renderMonths(monthsData);
+  renderPlanMonths(monthsData);
 
   // Hide loading skeletons, show real content (active tab only)
   const loadingEl = document.getElementById("dash-loading");
@@ -70,33 +74,25 @@ async function loadDashboard() {
   switchDashTab(currentTab); // re-applies hidden/visible to the right view
 }
 
-async function renderMonths() {
-  const listEl = document.getElementById("months-list");
-  const emptyEl = document.getElementById("months-empty");
-  listEl.innerHTML = "";
-
+// Load every month + its expenses (in parallel) and compute the figures both the
+// Monthly and Plans tabs need: spent, currentBalance, totalRemaining (= currentBalance
+// − spent), salary-based remaining, and per-category totals. Newest first.
+async function fetchMonthsData() {
   const monthsSnap = await db.collection("users").doc(userId)
     .collection("months")
     .orderBy("createdAt", "desc")
     .get();
 
-  if (monthsSnap.empty) {
-    emptyEl.classList.remove("hidden");
-    document.getElementById("comparison-card").classList.add("hidden");
-    document.getElementById("trends-card").classList.add("hidden");
-    return;
-  }
-  emptyEl.classList.add("hidden");
+  if (monthsSnap.empty) return [];
 
-  // Fetch every month's expenses in parallel (one round trip instead of N).
   const monthExpenseSnaps = await Promise.all(
     monthsSnap.docs.map(function (d) { return d.ref.collection("expenses").get(); })
   );
 
-  // Compute spend + category totals for each month (order preserved).
   const monthsData = [];
   monthsSnap.docs.forEach(function (monthDoc, idx) {
     const month = monthDoc.data();
+    const currentBalance = Number(month.currentBalance) || 0;
     let spent = 0;
     const byCategory = {};
     monthExpenseSnaps[idx].forEach(function (expDoc) {
@@ -114,10 +110,28 @@ async function renderMonths() {
       id: monthDoc.id,
       name: month.name,
       spent: spent,
+      currentBalance: currentBalance,
+      totalRemaining: currentBalance - spent,
       remaining: userSalary - spent,
       byCategory: byCategory
     });
   });
+
+  return monthsData;
+}
+
+function renderMonths(monthsData) {
+  const listEl = document.getElementById("months-list");
+  const emptyEl = document.getElementById("months-empty");
+  listEl.innerHTML = "";
+
+  if (!monthsData.length) {
+    emptyEl.classList.remove("hidden");
+    document.getElementById("comparison-card").classList.add("hidden");
+    document.getElementById("trends-card").classList.add("hidden");
+    return;
+  }
+  emptyEl.classList.add("hidden");
 
   renderComparisonCard(monthsData);
   renderInsights(monthsData);
@@ -586,333 +600,39 @@ async function createNewBudget() {
 }
 
 // ============================================================
-// Plans — forecast ledgers (start balance → subtract each item)
+// Plans — now month-scoped. The Plans tab lists the existing months with each
+// month's current balance + total remaining; tapping one opens its plan table
+// (plan.html?month=<id>). Plan rows live under months/{id}/plans.
 // ============================================================
 
-async function renderPlans() {
+function renderPlanMonths(monthsData) {
   const listEl = document.getElementById("plans-list");
   const emptyEl = document.getElementById("plans-empty");
   listEl.innerHTML = "";
 
-  const plansSnap = await db.collection("users").doc(userId)
-    .collection("plans")
-    .orderBy("createdAt", "desc")
-    .get();
-
-  if (plansSnap.empty) {
+  if (!monthsData.length) {
     emptyEl.classList.remove("hidden");
     return;
   }
   emptyEl.classList.add("hidden");
 
-  // Completed plans sink to the bottom; active ones keep their createdAt-desc order.
-  // Array.sort is stable, so order within each group is preserved.
-  const docs = plansSnap.docs.slice().sort(function (a, b) {
-    const ad = a.data().status === "done" ? 1 : 0;
-    const bd = b.data().status === "done" ? 1 : 0;
-    return ad - bd;
-  });
-
-  // Fetch every plan's items in parallel (one round trip instead of N).
-  const planItemSnaps = await Promise.all(
-    docs.map(function (d) { return d.ref.collection("items").get(); })
-  );
-
-  docs.forEach(function (planDoc, i) {
-    const p = planDoc.data();
-    const startBalance = Number(p.startBalance) || 0;
-    const isPlanDone = p.status === "done";
-    const itemsSnap = planItemSnaps[i];
-
-    let usedUp = 0;     // sum of effective costs (actual if done, else planned)
-    let doneCount = 0;
-    itemsSnap.forEach(function (it) {
-      const item = it.data();
-      const effective = item.status === "done"
-        ? (Number(item.actual) || 0)
-        : (Number(item.planned) || 0);
-      usedUp += effective;
-      if (item.status === "done") doneCount++;
-    });
-
-    const remaining = startBalance - usedUp;
-    const total = itemsSnap.size;
-    // For a completed plan: starting balance minus what was actually spent.
-    const planDiff = startBalance - (Number(p.actualSpent) || 0);
-
-    // List view only — the card is not a link; tapping it does nothing.
-    const card = document.createElement("div");
-    card.className = "budget-card plan-card-static" + (isPlanDone ? " is-plan-done" : "");
+  monthsData.forEach(function (m, i) {
+    const tr = m.totalRemaining;
+    const card = document.createElement("a");
+    card.className = "budget-card";
+    card.href = "plan.html?month=" + m.id;
     card.style.animationDelay = (i * 50) + "ms";
-
-    const monthTag = (isPlanDone && p.pushedTo && p.pushedTo.monthName)
-      ? ' <span class="plan-card-month-tag">→ ' + escapeHtml(p.pushedTo.monthName) + '</span>'
-      : '';
 
     card.innerHTML =
       '<div class="budget-row-top">' +
-        '<div class="budget-name">' + escapeHtml(p.name) +
-          (isPlanDone ? ' <span class="plan-card-done-tag">✓ Done</span>' + monthTag : '') +
-        '</div>' +
-        '<div class="budget-amount-tag">Start ' + formatMoney(startBalance) + '</div>' +
+        '<div class="budget-name">' + escapeHtml(m.name) + '</div>' +
+        '<div class="budget-amount-tag">Plan →</div>' +
       '</div>' +
       '<div class="budget-stats">' +
-        (isPlanDone && p.actualSpent != null
-          ? '<span>Spent <strong>' + formatMoney(Number(p.actualSpent) || 0) + '</strong></span>' +
-            '<span>Difference <strong style="color:' + (planDiff < 0 ? "var(--danger)" : "var(--success)") + ';">' + formatMoney(planDiff) + '</strong></span>'
-          : '<span>' + doneCount + '/' + total + ' done</span>' +
-            '<span>Remaining <strong style="color:' + (remaining < 0 ? "var(--danger)" : "var(--success)") + ';">' + formatMoney(remaining) + '</strong></span>') +
-      '</div>' +
-      '<div class="plan-card-foot">' +
-        (isPlanDone
-          ? '<button class="plan-card-reopen" data-plan-reopen="' + planDoc.id + '">Reopen</button>'
-          : '<button class="plan-card-done" data-plan-done="' + planDoc.id + '">✓ Mark done</button>') +
+        '<span>Current balance <strong>' + formatMoney(m.currentBalance) + '</strong></span>' +
+        '<span>Total remaining <strong style="color:' + (tr < 0 ? "var(--danger)" : "var(--success)") + ';">' + formatMoney(tr) + '</strong></span>' +
       '</div>';
-
-    // The card is a link; keep the Done/Reopen button from navigating into the plan.
-    const doneBtn = card.querySelector("[data-plan-done]");
-    if (doneBtn) {
-      doneBtn.addEventListener("click", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        markPlanDone(planDoc.id, p.name, startBalance);
-      });
-    }
-    const reopenBtn = card.querySelector("[data-plan-reopen]");
-    if (reopenBtn) {
-      reopenBtn.addEventListener("click", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        reopenPlan(planDoc.id);
-      });
-    }
 
     listEl.appendChild(card);
   });
-}
-
-// Mark a whole plan complete — ask how much was actually spent and which month
-// to record it in, push the spend into that month as a real expense, compare it
-// against the starting balance, and store the difference. Reversible.
-async function markPlanDone(planId, planName, startBalance) {
-  startBalance = Number(startBalance) || 0;
-
-  // Load the user's months so the spend can be saved into one (like a real expense).
-  const monthsSnap = await db.collection("users").doc(userId)
-    .collection("months").orderBy("createdAt", "desc").get();
-
-  if (monthsSnap.empty) {
-    showToast("Create a month first (Monthly tab) to record this spend.", "error", 3500);
-    return;
-  }
-
-  let monthOptions = "";
-  monthsSnap.forEach(function (m) {
-    monthOptions += '<option value="' + m.id + '">' + escapeHtml(m.data().name) + '</option>';
-  });
-
-  // Category + payment options — keys match month.js so the month page renders them correctly.
-  const PLAN_CATS = {
-    food: "🍔 Food", rent: "🏠 Rent", transport: "🚗 Transport", shopping: "🛍️ Shopping",
-    bills: "📄 Bills", health: "💊 Health", entertainment: "🎬 Fun", salary: "💰 Salary", other: "📌 Other"
-  };
-  const PLAN_PAYS = {
-    gpay: "📱 GPay", phonepe: "💜 PhonePe", paytm: "🅿️ Paytm", cash: "💵 Cash", card: "💳 Card", other: "❓ Other"
-  };
-  let catOptions = "";
-  Object.keys(PLAN_CATS).forEach(function (k) {
-    catOptions += '<option value="' + k + '"' + (k === "other" ? " selected" : "") + '>' + PLAN_CATS[k] + '</option>';
-  });
-  let payOptions = "";
-  Object.keys(PLAN_PAYS).forEach(function (k) {
-    payOptions += '<option value="' + k + '"' + (k === "cash" ? " selected" : "") + '>' + PLAN_PAYS[k] + '</option>';
-  });
-
-  const backdrop = document.createElement("div");
-  backdrop.className = "modal-backdrop";
-  backdrop.innerHTML =
-    '<div class="modal-card">' +
-      '<h3>Mark "' + escapeHtml(planName || "plan") + '" done</h3>' +
-      '<div class="add-expense-form">' +
-        '<div class="form-group">' +
-          '<label for="plan-spent-input">How much did you spend? (₹)</label>' +
-          '<input type="number" id="plan-spent-input" placeholder="e.g. 12000" min="0">' +
-        '</div>' +
-        '<div class="form-group">' +
-          '<label for="plan-month-select">Save to month</label>' +
-          '<select id="plan-month-select" class="plan-select">' + monthOptions + '</select>' +
-        '</div>' +
-        '<div class="form-group">' +
-          '<label for="plan-cat-select">Category</label>' +
-          '<select id="plan-cat-select" class="plan-select">' + catOptions + '</select>' +
-        '</div>' +
-        '<div class="form-group">' +
-          '<label for="plan-pay-select">Payment method</label>' +
-          '<select id="plan-pay-select" class="plan-select">' + payOptions + '</select>' +
-        '</div>' +
-        '<div class="plan-done-compare">' +
-          '<div class="pdc-cell">' +
-            '<span class="pdc-label">Starting balance</span>' +
-            '<span class="pdc-val">' + formatMoney(startBalance) + '</span>' +
-          '</div>' +
-          '<div class="pdc-cell">' +
-            '<span class="pdc-label">Spent</span>' +
-            '<span class="pdc-val" id="pdc-spent">' + formatMoney(0) + '</span>' +
-          '</div>' +
-          '<div class="pdc-cell">' +
-            '<span class="pdc-label">Difference</span>' +
-            '<span class="pdc-val" id="pdc-diff" style="color:var(--success);">' + formatMoney(startBalance) + '</span>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-      '<div class="modal-actions">' +
-        '<button class="btn-secondary" data-act="cancel">Cancel</button>' +
-        '<button class="btn-primary" data-act="ok">Mark done</button>' +
-      '</div>' +
-    '</div>';
-
-  function cleanup() { if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop); }
-  backdrop.querySelector('[data-act="cancel"]').addEventListener("click", cleanup);
-  backdrop.addEventListener("click", function (e) { if (e.target === backdrop) cleanup(); });
-
-  const spentInput = backdrop.querySelector("#plan-spent-input");
-  const monthSel = backdrop.querySelector("#plan-month-select");
-  const spentEl = backdrop.querySelector("#pdc-spent");
-  const diffEl = backdrop.querySelector("#pdc-diff");
-
-  // Live preview of spent + difference as the user types.
-  function refresh() {
-    const spent = Number(spentInput.value) || 0;
-    const diff = startBalance - spent;
-    spentEl.textContent = formatMoney(spent);
-    diffEl.textContent = formatMoney(diff);
-    diffEl.style.color = diff < 0 ? "var(--danger)" : "var(--success)";
-  }
-  spentInput.addEventListener("input", refresh);
-
-  backdrop.querySelector('[data-act="ok"]').addEventListener("click", async function () {
-    if (spentInput.value === "" || isNaN(Number(spentInput.value))) {
-      return showToast("Enter how much you spent.", "error");
-    }
-    const spent = Number(spentInput.value);
-    if (spent < 0) return showToast("Amount can't be negative.", "error");
-    const monthId = monthSel.value;
-    const monthName = monthSel.options[monthSel.selectedIndex].textContent;
-    if (!monthId) return showToast("Pick a month.", "error");
-    const category = backdrop.querySelector("#plan-cat-select").value;
-    const paymentMethod = backdrop.querySelector("#plan-pay-select").value;
-
-    const diff = startBalance - spent;
-    cleanup();
-
-    // 1) Record the real spend in the chosen month (same shape as month.js expenses).
-    const expRef = await db.collection("users").doc(userId)
-      .collection("months").doc(monthId).collection("expenses").add({
-        name: planName || "Plan",
-        amount: spent,
-        type: "minus",
-        category: category,
-        paymentMethod: paymentMethod,
-        notes: "From plan: " + (planName || ""),
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-
-    // 2) Mark the plan done with the actual spend, difference, and where it went
-    //    (incl. the expense id so Reopen can remove it from the month later).
-    await db.collection("users").doc(userId)
-      .collection("plans").doc(planId)
-      .update({
-        status: "done",
-        actualSpent: spent,
-        difference: diff,
-        pushedTo: { monthId: monthId, monthName: monthName, expenseId: expRef.id },
-        completedAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-
-    let msg = "Plan done — " + formatMoney(spent) + " added to " + monthName;
-    if (diff > 0) msg += " (" + formatMoney(diff) + " left over)";
-    else if (diff < 0) msg += " (over by " + formatMoney(Math.abs(diff)) + ")";
-    showToast(msg, "success", 3500);
-    renderPlans();
-  });
-
-  document.body.appendChild(backdrop);
-  setTimeout(function () { spentInput.focus(); }, 50);
-}
-
-// Reopen a completed plan — back to the active list. Also removes the expense it
-// pushed into the month, so that month's spent recalculates without it.
-async function reopenPlan(planId) {
-  const planRef = db.collection("users").doc(userId).collection("plans").doc(planId);
-  const snap = await planRef.get();
-  const pushed = snap.exists && snap.data() ? snap.data().pushedTo : null;
-
-  if (pushed && pushed.monthId && pushed.expenseId) {
-    await db.collection("users").doc(userId)
-      .collection("months").doc(pushed.monthId)
-      .collection("expenses").doc(pushed.expenseId)
-      .delete().catch(function () {});
-  }
-
-  await planRef.update({
-    status: "active",
-    completedAt: firebase.firestore.FieldValue.delete(),
-    actualSpent: firebase.firestore.FieldValue.delete(),
-    difference: firebase.firestore.FieldValue.delete(),
-    pushedTo: firebase.firestore.FieldValue.delete()
-  });
-  showToast("Plan reopened — removed from " + (pushed && pushed.monthName ? pushed.monthName : "the month") + ".", "success", 3500);
-  renderPlans();
-}
-
-async function createNewPlan() {
-  const backdrop = document.createElement("div");
-  backdrop.className = "modal-backdrop";
-  backdrop.innerHTML =
-    '<div class="modal-card">' +
-      '<h3>New Plan</h3>' +
-      '<div class="add-expense-form">' +
-        '<div class="form-group">' +
-          '<label for="plan-name-input">Plan name</label>' +
-          '<input type="text" id="plan-name-input" placeholder="e.g. May Planning">' +
-        '</div>' +
-        '<div class="form-group">' +
-          '<label for="plan-balance-input">Starting balance (₹)</label>' +
-          '<input type="number" id="plan-balance-input" placeholder="e.g. 13980" min="0">' +
-        '</div>' +
-      '</div>' +
-      '<div class="modal-actions">' +
-        '<button class="btn-secondary" data-act="cancel">Cancel</button>' +
-        '<button class="btn-primary" data-act="ok">Create</button>' +
-      '</div>' +
-    '</div>';
-
-  function cleanup() {
-    if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
-  }
-
-  backdrop.querySelector('[data-act="cancel"]').addEventListener("click", cleanup);
-  backdrop.addEventListener("click", function (e) { if (e.target === backdrop) cleanup(); });
-
-  backdrop.querySelector('[data-act="ok"]').addEventListener("click", async function () {
-    const name = backdrop.querySelector("#plan-name-input").value.trim();
-    const startBalance = Number(backdrop.querySelector("#plan-balance-input").value);
-    if (!name) return showToast("Enter a plan name.", "error");
-    if (!startBalance || startBalance <= 0) return showToast("Enter a valid starting balance.", "error");
-
-    await db.collection("users").doc(userId)
-      .collection("plans").add({
-        name: name,
-        startBalance: startBalance,
-        status: "active",
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-    cleanup();
-    // List view only — stay on the Plans list instead of opening the plan detail.
-    showToast("Plan created.", "success");
-    renderPlans();
-  });
-
-  document.body.appendChild(backdrop);
-  setTimeout(function () { backdrop.querySelector("#plan-name-input").focus(); }, 50);
 }

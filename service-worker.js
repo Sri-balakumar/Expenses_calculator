@@ -1,6 +1,6 @@
 // Service worker — caches the app shell so it loads instantly + works offline.
 
-const CACHE_NAME = "expense-calc-v13";
+const CACHE_NAME = "expense-calc-v14";
 
 const APP_SHELL = [
   "./",

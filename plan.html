@@ -21,7 +21,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
           Back
         </a>
-        <h1 id="plan-name" class="month-title">Loading...</h1>
+        <h1 id="plan-month-name" class="month-title">Loading...</h1>
       </div>
       <div id="header-actions"></div>
     </div>
@@ -30,39 +30,53 @@
       <p class="muted">Loading...</p>
     </div>
 
-    <!-- Start balance + summary -->
-    <div id="plan-summary-card" class="card hidden" style="padding: 18px 22px;">
-      <div class="plan-summary">
-        <div class="plan-summary-cell">
-          <div class="plan-summary-label">Starting balance</div>
-          <div class="plan-summary-value" id="sum-start">—</div>
+    <!-- Month figures -->
+    <div id="plan-figures" class="card hidden" style="padding: 18px 22px;">
+      <div class="plan-figures-row">
+        <div class="pf-cell">
+          <span class="pf-label">Current balance</span>
+          <span class="pf-val" id="pf-balance">₹0</span>
         </div>
-        <div class="plan-summary-cell">
-          <div class="plan-summary-label">Remaining</div>
-          <div class="plan-summary-value" id="sum-remaining">—</div>
-        </div>
-        <div class="plan-summary-cell">
-          <div class="plan-summary-label">Difference</div>
-          <div class="plan-summary-value" id="sum-diff">—</div>
+        <div class="pf-cell">
+          <span class="pf-label">Total remaining</span>
+          <span class="pf-val" id="pf-remaining">₹0</span>
         </div>
       </div>
-      <button class="btn-secondary" id="edit-start-btn" style="width:100%;margin-top:14px;">
-        Edit starting balance
-      </button>
+      <div class="plan-figures-sub">
+        Planned <strong id="pf-planned">₹0</strong>
+        <span class="dot">·</span>
+        Spent <strong id="pf-spent">₹0</strong>
+      </div>
     </div>
 
-    <!-- Ledger -->
-    <div id="plan-body" class="card hidden">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;">
-        <h2 style="margin:0;">Planned items</h2>
-        <button class="btn-primary" id="add-item-btn" style="padding:9px 14px;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Add item
-        </button>
+    <!-- Plan table -->
+    <div id="plan-table-card" class="card hidden">
+      <div class="plan-table-head">
+        <h2 style="margin:0;">Plans</h2>
+        <button class="btn-secondary" id="transfer-all-btn" style="padding:9px 14px;">Transfer pending →</button>
       </div>
-      <div id="plan-items"></div>
-      <div id="plan-items-empty" class="empty-state hidden" style="padding:24px 12px;">
-        <p>No items yet. Tap <strong>+ Add item</strong> to plan a spend.</p>
+      <div class="plan-table-wrap">
+        <table class="plan-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Planned → Paid</th>
+              <th>Category</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="plan-rows"></tbody>
+          <tbody id="plan-add">
+            <tr class="plan-add-row">
+              <td><input type="text" id="add-name" placeholder="e.g. Recharge"></td>
+              <td><input type="number" id="add-amount" placeholder="0" min="0"></td>
+              <td><select id="add-cat" class="plan-select"></select></td>
+              <td class="muted">New</td>
+              <td><button class="btn-primary plan-add-btn" id="add-plan-btn">Add</button></td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 

@@ -1377,12 +1377,16 @@ button.disabled {
 .plan-done-btn:hover { filter: brightness(1.1); }
 .plan-done-btn:active { transform: scale(0.97); }
 .plan-done-chip {
-  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-size: 0.8rem;
   font-weight: 700;
   color: var(--success);
   background: rgba(34, 197, 94, 0.14);
-  padding: 7px 14px;
-  border-radius: 10px;
+  padding: 5px 12px;
+  border-radius: 999px;
 }
 
 /* Plan card (dashboard list) — list view only, Mark done / Reopen */
@@ -1880,6 +1884,146 @@ a:not([class]):hover { text-decoration: underline; }
   .btn-plus, .btn-minus { width: 52px; height: 52px; font-size: 1.4rem; }
   .month-card-icon { width: 40px; height: 40px; }
 }
+
+/* ============================================================
+   Month-scoped Plans — figures + table
+   ============================================================ */
+.plan-figures-row {
+  display: flex;
+  gap: 10px;
+}
+.pf-cell {
+  flex: 1;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pf-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+.pf-val { font-size: 1.4rem; font-weight: 800; }
+
+.plan-figures-sub {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.plan-figures-sub strong { color: var(--text); font-weight: 800; }
+.plan-figures-sub .dot { margin: 0 8px; opacity: 0.5; }
+
+/* Planned → Paid amount cell */
+.plan-amt-planned { color: var(--text-muted); }
+.plan-amt-arrow { color: var(--text-muted); opacity: 0.7; }
+.plan-diff {
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.plan-diff.over { color: var(--danger); background: rgba(239, 68, 68, 0.12); }
+.plan-diff.under { color: var(--success); background: rgba(34, 197, 94, 0.14); }
+
+.plan-table-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.plan-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.plan-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  min-width: 560px;
+}
+.plan-table th,
+.plan-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: middle;
+}
+.plan-table thead th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-weight: 700;
+  border-bottom: 1.5px solid var(--border);
+}
+.plan-table tbody tr:hover { background: var(--chip-bg); }
+.plan-table .plan-row-done td { opacity: 0.72; }
+
+.plan-pending-chip {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--chip-bg);
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.plan-from-tag {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--primary);
+  background: var(--chip-bg);
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.plan-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.plan-mini-btn {
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.08s, border-color 0.15s;
+  white-space: nowrap;
+}
+.plan-mini-btn:hover { border-color: var(--primary); }
+.plan-mini-btn:active { transform: scale(0.96); }
+.plan-mini-btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.plan-mini-btn.danger { color: var(--danger); border-color: rgba(239, 68, 68, 0.35); }
+
+/* Inline add-plan row */
+.plan-add-row td { border-bottom: none; padding-top: 12px; }
+.plan-add-row input,
+.plan-add-row select {
+  width: 100%;
+  min-width: 90px;
+  padding: 8px 10px;
+  font-size: 0.88rem;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--text);
+}
+.plan-add-btn { padding: 8px 16px; font-size: 0.85rem; }
 
 /* ============================================================
    Side-by-side card pair utility (single column on mobile,
