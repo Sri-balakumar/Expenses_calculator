@@ -41,6 +41,14 @@ let expensesRef = null;
 let currentExpenses = []; // newest first
 let knownExpenseIds = new Set();
 
+// Long-press multi-select state
+let selectMode = false;
+let selectedIds = new Set();
+
+// Saved calculations (per-month Firestore subcollection)
+let savedCalcsRef = null;
+let currentSavedCalcs = [];
+
 // State for forms
 let selectedCategory = DEFAULT_CATEGORY;
 let editing = null; // { id, type, category }
@@ -138,6 +146,14 @@ async function loadMonth() {
   expensesRef = itemDoc.ref.collection("expenses");
   expensesRef.orderBy("createdAt", "desc").onSnapshot(function (snap) {
     renderExpenses(snap);
+  });
+
+  savedCalcsRef = itemDoc.ref.collection("savedCalculations");
+  savedCalcsRef.orderBy("createdAt", "desc").onSnapshot(function (snap) {
+    currentSavedCalcs = snap.docs.map(function (d) {
+      return Object.assign({ id: d.id }, d.data());
+    });
+    renderSavedCalcs();
   });
 }
 
@@ -318,6 +334,8 @@ function applyFilters() {
   } else {
     renderRowsByWeek(listEl, filtered);
   }
+
+  listEl.classList.toggle("select-mode", selectMode);
 }
 
 function renderRowsByWeek(listEl, expenses) {
@@ -347,9 +365,11 @@ function renderRowsByWeek(listEl, expenses) {
 function buildRow(exp) {
   const row = document.createElement("div");
   row.className = "expense-row";
+  row.dataset.id = exp.id;
   if (!knownExpenseIds.has(exp.id) && knownExpenseIds.size > 0) {
     row.classList.add("slide-down");
   }
+  if (selectMode && selectedIds.has(exp.id)) row.classList.add("selected");
 
   const cat = CATEGORIES[exp.category] || CATEGORIES.other;
   const iconClass = exp.type === "plus" ? "plus" : "minus";
@@ -383,10 +403,37 @@ function buildRow(exp) {
       notesHint +
     '</div>';
 
-  // Tap whole row to open details
+  // Multi-select checkbox (hidden via CSS unless the list is in select mode).
+  const check = document.createElement("div");
+  check.className = "row-check";
+  check.textContent = (selectMode && selectedIds.has(exp.id)) ? "✅" : "";
+  row.insertBefore(check, row.firstChild);
+
+  // Tap to open details; long-press (~500ms) enters multi-select mode.
+  let lpTimer = null, lpFired = false, lpX = 0, lpY = 0;
+  function clearLp() { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }
+
+  row.addEventListener("pointerdown", function (e) {
+    if (e.target.closest(".row-actions")) return;
+    lpFired = false; lpX = e.clientX; lpY = e.clientY;
+    lpTimer = setTimeout(function () {
+      lpFired = true;
+      if (!selectMode) enterSelectMode(exp.id);
+      else toggleSelect(exp.id);
+    }, 500);
+  });
+  row.addEventListener("pointermove", function (e) {
+    if (lpTimer && (Math.abs(e.clientX - lpX) > 10 || Math.abs(e.clientY - lpY) > 10)) clearLp();
+  });
+  row.addEventListener("pointerup", clearLp);
+  row.addEventListener("pointercancel", clearLp);
+  row.addEventListener("pointerleave", clearLp);
+
   row.addEventListener("click", function (e) {
     // Ignore clicks on action buttons
     if (e.target.closest(".row-actions")) return;
+    if (lpFired) { lpFired = false; return; }   // long-press already handled it
+    if (selectMode) { toggleSelect(exp.id); return; }
     openDetailsModal(exp);
   });
 
@@ -456,6 +503,250 @@ function openDetailsModal(exp) {
 function closeDetailsModal() {
   document.getElementById("details-modal").classList.add("hidden");
   window.__detailsCurrent = null;
+}
+
+// --- Long-press calculator -------------------------------------------
+var calc = { acc: 0, op: null, operand: "", waiting: true };
+
+function openCalcModal(exp) {
+  calc.acc = exp.amount;
+  calc.op = exp.type === "plus" ? "+" : "-";
+  calc.operand = "";
+  calc.waiting = true;                 // next digit starts a fresh operand
+  document.getElementById("calc-title").textContent = exp.name + " — Calculator";
+  renderCalc();
+  document.getElementById("calc-modal").classList.remove("hidden");
+}
+
+function closeCalcModal() {
+  document.getElementById("calc-modal").classList.add("hidden");
+}
+
+// --- Long-press multi-select ----------------------------------------
+function enterSelectMode(id) {
+  selectMode = true;
+  selectedIds = new Set([id]);
+  document.getElementById("expenses-list").classList.add("select-mode");
+  updateRowSelection(id);            // in-place, no re-render (keeps long-press click guard intact)
+  updateSelectBar();
+}
+
+function exitSelectMode() {
+  selectMode = false;
+  selectedIds = new Set();
+  const listEl = document.getElementById("expenses-list");
+  listEl.classList.remove("select-mode");
+  listEl.querySelectorAll(".expense-row.selected").forEach(function (r) {
+    r.classList.remove("selected");
+    const c = r.querySelector(".row-check");
+    if (c) c.textContent = "";
+  });
+  updateSelectBar();
+}
+
+function toggleSelect(id) {
+  if (selectedIds.has(id)) selectedIds.delete(id);
+  else selectedIds.add(id);
+  if (selectedIds.size === 0) { exitSelectMode(); return; }
+  updateRowSelection(id);
+  updateSelectBar();
+}
+
+function updateRowSelection(id) {
+  const row = document.querySelector('#expenses-list .expense-row[data-id="' + id + '"]');
+  if (!row) return;
+  const on = selectedIds.has(id);
+  row.classList.toggle("selected", on);
+  const check = row.querySelector(".row-check");
+  if (check) check.textContent = on ? "✅" : "";
+}
+
+function selectionTotal() {           // signed: spends subtract, income adds
+  let total = 0;
+  selectedIds.forEach(function (id) {
+    const e = currentExpenses.find(function (x) { return x.id === id; });
+    if (e) total += e.type === "plus" ? e.amount : -e.amount;
+  });
+  return total;
+}
+
+function updateSelectBar() {
+  const bar = document.getElementById("select-bar");
+  if (!bar) return;
+  if (selectMode && selectedIds.size > 0) {
+    bar.classList.remove("hidden");
+    document.getElementById("select-count").textContent =
+      selectedIds.size + " selected · " + formatMoney(selectionTotal());
+  } else {
+    bar.classList.add("hidden");
+  }
+}
+
+function openCalcFromSelection() {
+  const items = [];
+  selectedIds.forEach(function (id) {
+    const e = currentExpenses.find(function (x) { return x.id === id; });
+    if (e) items.push(e);
+  });
+  if (items.length === 0) return;
+  // Signed total: spends subtract, income adds.
+  calc.acc = items.reduce(function (s, e) {
+    return s + (e.type === "plus" ? e.amount : -e.amount);
+  }, 0);
+  calc.op = null; calc.operand = ""; calc.waiting = true;
+  document.getElementById("calc-title").textContent = items.length + " items — Total";
+  renderCalc();
+  // Show the breakdown (e.g. "− ₹1,000  − ₹60  + ₹3"); clears once the user starts typing.
+  document.getElementById("calc-expr").textContent =
+    items.map(function (e) {
+      return (e.type === "plus" ? "+ " : "− ") + formatMoney(e.amount);
+    }).join("  ");
+  document.getElementById("calc-modal").classList.remove("hidden");
+}
+
+// --- Saved calculations ---------------------------------------------
+async function saveSelection() {
+  if (!savedCalcsRef || selectedIds.size === 0) return;
+  const items = [];
+  selectedIds.forEach(function (id) {
+    const e = currentExpenses.find(function (x) { return x.id === id; });
+    if (e) items.push({ name: e.name, amount: e.amount, type: e.type });
+  });
+  if (items.length === 0) return;
+
+  const total = items.reduce(function (s, e) {
+    return s + (e.type === "plus" ? e.amount : -e.amount);
+  }, 0);
+
+  const defaultName = new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+  const name = await showPrompt({
+    title: "Name this calculation",
+    placeholder: "e.g. June recharges",
+    defaultValue: defaultName,
+    confirmText: "Save"
+  });
+  if (name === null) return; // cancelled
+
+  await savedCalcsRef.add({
+    name: name,
+    total: total,
+    items: items,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  showToast("Calculation saved", "success");
+  exitSelectMode();
+  switchMonthTab("saved");
+}
+
+function renderSavedCalcs() {
+  const listEl = document.getElementById("saved-calcs-list");
+  const emptyEl = document.getElementById("empty-saved");
+  if (!listEl) return;
+  listEl.innerHTML = "";
+  if (!currentSavedCalcs.length) {
+    if (emptyEl) emptyEl.classList.remove("hidden");
+    return;
+  }
+  if (emptyEl) emptyEl.classList.add("hidden");
+  currentSavedCalcs.forEach(function (c) {
+    listEl.appendChild(buildSavedCalcCard(c));
+  });
+}
+
+function buildSavedCalcCard(c) {
+  const card = document.createElement("div");
+  card.className = "saved-calc";
+
+  const dateStr = c.createdAt && c.createdAt.toDate
+    ? c.createdAt.toDate().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+    : "";
+  const items = Array.isArray(c.items) ? c.items : [];
+  const itemsHtml = items.map(function (it) {
+    const cls = it.type === "plus" ? "plus" : "minus";
+    const op = it.type === "plus" ? "+" : "−";
+    return '<div class="saved-calc-item">' +
+        '<span>' + escapeHtml(it.name || "") + '</span>' +
+        '<span class="' + cls + '">' + op + ' ' + formatMoney(it.amount) + '</span>' +
+      '</div>';
+  }).join("");
+
+  card.innerHTML =
+    '<div class="saved-calc-head">' +
+      '<div class="saved-calc-meta">' +
+        '<div class="saved-calc-name">' + escapeHtml(c.name || "Untitled") + '</div>' +
+        '<div class="saved-calc-date">' + escapeHtml(dateStr) + ' · ' + items.length + ' items</div>' +
+      '</div>' +
+      '<div class="saved-calc-total">' + formatMoney(c.total) + '</div>' +
+    '</div>' +
+    '<div class="saved-calc-items">' + itemsHtml + '</div>';
+
+  const del = document.createElement("button");
+  del.className = "btn-icon-only saved-calc-del";
+  del.title = "Delete";
+  del.innerHTML = TRASH_SVG;
+  del.addEventListener("click", async function () {
+    const ok = await showConfirm({
+      title: "Delete this calculation?",
+      message: (c.name || "Untitled") + " — " + formatMoney(c.total),
+      confirmText: "Delete"
+    });
+    if (ok) {
+      await savedCalcsRef.doc(c.id).delete();
+      showToast("Calculation deleted", "success");
+    }
+  });
+  card.querySelector(".saved-calc-head").appendChild(del);
+
+  return card;
+}
+
+function switchMonthTab(tab) {
+  ["expenses", "saved"].forEach(function (t) {
+    const panel = document.getElementById("tab-" + t);
+    const btn = document.getElementById("tabbtn-" + t);
+    if (panel) panel.classList.toggle("hidden", t !== tab);
+    if (btn) btn.classList.toggle("active", t === tab);
+  });
+}
+
+function renderCalc() {
+  var opSym = { "+": "+", "-": "−", "*": "×", "/": "÷" };
+  var shown = calc.operand !== "" ? calc.operand : formatMoney(calc.acc);
+  document.getElementById("calc-result").textContent = shown;
+  document.getElementById("calc-expr").textContent =
+    calc.op ? formatMoney(calc.acc) + " " + opSym[calc.op] : "";
+}
+
+function applyOp() {                   // fold the pending op into the accumulator
+  var b = parseFloat(calc.operand);
+  if (isNaN(b)) return;
+  switch (calc.op) {
+    case "+": calc.acc += b; break;
+    case "-": calc.acc -= b; break;
+    case "*": calc.acc *= b; break;
+    case "/": calc.acc = b === 0 ? 0 : calc.acc / b; break;
+    default:  calc.acc = b;
+  }
+}
+
+function calcInput(key) {
+  if (/^[0-9]$/.test(key)) {
+    calc.operand = (calc.waiting ? "" : calc.operand) + key;
+    calc.waiting = false;
+  } else if (key === ".") {
+    if (calc.waiting) { calc.operand = "0"; calc.waiting = false; }
+    if (calc.operand.indexOf(".") === -1) calc.operand += calc.operand === "" ? "0." : ".";
+  } else if (key === "back") {
+    if (!calc.waiting) calc.operand = calc.operand.slice(0, -1);
+  } else if (key === "clear") {
+    calc.acc = 0; calc.op = null; calc.operand = ""; calc.waiting = true;
+  } else if (key === "+" || key === "-" || key === "*" || key === "/") {
+    if (calc.operand !== "") { applyOp(); calc.operand = ""; }
+    calc.op = key; calc.waiting = true;
+  } else if (key === "=") {
+    if (calc.operand !== "") { applyOp(); calc.operand = ""; calc.op = null; calc.waiting = true; }
+  }
+  renderCalc();
 }
 
 function weekOfMonth(date) {

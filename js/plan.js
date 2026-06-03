@@ -144,18 +144,23 @@ function renderRows() {
 
   currentPlans.forEach(function (p) {
     const isDone = p.status === "done";
+    const isPartial = p.status === "partial";
     const cat = PLAN_CATEGORIES[p.category] || PLAN_CATEGORIES.other;
     const planned = Number(p.planned) || 0;
     const actual = Number(p.actual) || 0;
+    const paid = Number(p.paid) || 0;
+    const remaining = Math.max(0, planned - paid);
     totalPlanned += planned;
     if (isDone) totalSpent += actual;
+    else if (isPartial) { totalSpent += paid; totalPending += remaining; }
     else totalPending += planned;
 
     const transferTag = p.transferredFrom
       ? ' <span class="plan-from-tag">↪ ' + escapeHtmlPlan(p.transferredFrom) + '</span>'
       : '';
 
-    // Amount cell: pending shows planned; done shows planned → paid + the extra/saved.
+    // Amount cell: pending shows planned; partial shows planned → paid · left;
+    // done shows planned → paid + the extra/saved.
     let amountCell;
     if (isDone) {
       const diff = actual - planned; // + = paid more than planned
@@ -164,20 +169,37 @@ function renderRows() {
       else if (diff < 0) badge = ' <span class="plan-diff under">−' + formatMoney(Math.abs(diff)) + '</span>';
       amountCell = '<span class="plan-amt-planned">' + formatMoney(planned) + '</span>' +
         ' <span class="plan-amt-arrow">→</span> <strong>' + formatMoney(actual) + '</strong>' + badge;
+    } else if (isPartial) {
+      amountCell = '<span class="plan-amt-planned">' + formatMoney(planned) + '</span>' +
+        ' <span class="plan-amt-arrow">→</span> <strong>' + formatMoney(paid) + ' paid</strong>' +
+        ' <span class="plan-diff under">' + formatMoney(remaining) + ' left</span>';
     } else {
       amountCell = formatMoney(planned);
     }
 
     const statusCell = isDone
       ? '<span class="plan-done-chip">✓ Done</span>'
-      : '<span class="plan-pending-chip">Pending</span>';
+      : isPartial
+        ? '<span class="plan-partial-chip">◐ Partial</span>'
+        : '<span class="plan-pending-chip">Pending</span>';
 
-    const actions = isDone
-      ? '<button class="plan-mini-btn" data-undo="' + p.id + '">Undo</button>' +
-        '<button class="plan-mini-btn danger" data-del="' + p.id + '">Delete</button>'
-      : '<button class="plan-mini-btn primary" data-done="' + p.id + '">Done</button>' +
+    let actions;
+    if (isDone) {
+      actions =
+        '<button class="plan-mini-btn" data-undo="' + p.id + '">Undo</button>' +
+        '<button class="plan-mini-btn danger" data-del="' + p.id + '">Delete</button>';
+    } else if (isPartial) {
+      actions =
+        '<button class="plan-mini-btn primary" data-part="' + p.id + '">Part done</button>' +
+        '<button class="plan-mini-btn" data-done="' + p.id + '">Done</button>' +
+        '<button class="plan-mini-btn danger" data-del="' + p.id + '">Delete</button>';
+    } else {
+      actions =
+        '<button class="plan-mini-btn primary" data-done="' + p.id + '">Done</button>' +
+        '<button class="plan-mini-btn" data-part="' + p.id + '">Part done</button>' +
         '<button class="plan-mini-btn" data-transfer="' + p.id + '">Transfer</button>' +
         '<button class="plan-mini-btn danger" data-del="' + p.id + '">Delete</button>';
+    }
 
     const tr = document.createElement("tr");
     if (isDone) tr.className = "plan-row-done";
@@ -200,6 +222,9 @@ function renderRows() {
 
   tbody.querySelectorAll("[data-done]").forEach(function (b) {
     b.addEventListener("click", function () { markPlanRowDone(b.dataset.done); });
+  });
+  tbody.querySelectorAll("[data-part]").forEach(function (b) {
+    b.addEventListener("click", function () { partPayPlan(b.dataset.part); });
   });
   tbody.querySelectorAll("[data-undo]").forEach(function (b) {
     b.addEventListener("click", function () { undoPlanRow(b.dataset.undo); });
@@ -250,6 +275,8 @@ async function addPlan() {
     category: catSel.value || PLAN_DEFAULT_CATEGORY,
     status: "pending",
     actual: null,
+    paid: 0,
+    payments: [],
     pushedExpenseId: null,
     createdAt: firebase.firestore.FieldValue.serverTimestamp()
   });
@@ -260,10 +287,28 @@ async function addPlan() {
   nameInput.focus();
 }
 
+// ---- Finish a partially-paid plan → just close it (no new expense) ----
+async function finalizePartialDone(p) {
+  const planned = Number(p.planned) || 0;
+  const paid = Number(p.paid) || 0;
+  const ok = await showConfirm({
+    title: 'Finish "' + p.name + '"?',
+    message: 'Spent ' + formatMoney(paid) + ' of ' + formatMoney(planned) +
+      ' planned. The remaining ' + formatMoney(Math.max(0, planned - paid)) + " won't be recorded.",
+    confirmText: "Finish",
+    danger: false
+  });
+  if (!ok) return;
+  await plansRef.doc(p.id).update({ status: "done", actual: paid });
+  showToast(p.name + " closed — " + formatMoney(paid) + " spent", "success", 3000);
+}
+
 // ---- Mark a plan done → record a real expense in THIS month ----
 function markPlanRowDone(id) {
   const p = planById(id);
   if (!p) return;
+  // Already paid in parts → just close it (the partials are the recorded spend).
+  if ((Number(p.paid) || 0) > 0) return finalizePartialDone(p);
   const planned = Number(p.planned) || 0;
 
   let catOptions = "";
@@ -363,10 +408,121 @@ function markPlanRowDone(id) {
   setTimeout(function () { actualInput.focus(); actualInput.select(); }, 50);
 }
 
+// ---- Record a partial payment → real expense + accumulate, keep plan open ----
+function partPayPlan(id) {
+  const p = planById(id);
+  if (!p) return;
+  const planned = Number(p.planned) || 0;
+  const paid = Number(p.paid) || 0;
+  const remaining = Math.max(0, planned - paid);
+
+  let catOptions = "";
+  Object.keys(PLAN_CATEGORIES).forEach(function (k) {
+    const c = PLAN_CATEGORIES[k];
+    const selected = k === (p.category || PLAN_DEFAULT_CATEGORY) ? " selected" : "";
+    catOptions += '<option value="' + k + '"' + selected + '>' + c.emoji + " " + c.label + '</option>';
+  });
+
+  const PAYS = { gpay: "📱 GPay", phonepe: "💜 PhonePe", paytm: "🅿️ Paytm", cash: "💵 Cash", card: "💳 Card", other: "❓ Other" };
+  let payOptions = "";
+  Object.keys(PAYS).forEach(function (k) {
+    payOptions += '<option value="' + k + '"' + (k === "cash" ? " selected" : "") + '>' + PAYS[k] + '</option>';
+  });
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML =
+    '<div class="modal-card">' +
+      '<h3>Record payment for "' + escapeHtmlPlan(p.name) + '"</h3>' +
+      '<p style="margin:-6px 0 14px;font-size:0.85rem;color:var(--text-muted);">' +
+        formatMoney(paid) + ' paid of ' + formatMoney(planned) + ' · ' + formatMoney(remaining) + ' left</p>' +
+      '<div class="add-expense-form">' +
+        '<div class="form-group">' +
+          '<label for="part-amount">Payment amount (₹)</label>' +
+          '<input type="number" id="part-amount" min="0">' +
+        '</div>' +
+        '<div class="form-group">' +
+          '<label for="part-cat">Category</label>' +
+          '<select id="part-cat" class="plan-select">' + catOptions + '</select>' +
+        '</div>' +
+        '<div class="form-group">' +
+          '<label for="part-pay">Payment method</label>' +
+          '<select id="part-pay" class="plan-select">' + payOptions + '</select>' +
+        '</div>' +
+      '</div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn-secondary" data-act="cancel">Cancel</button>' +
+        '<button class="btn-primary" data-act="ok">Record payment</button>' +
+      '</div>' +
+    '</div>';
+
+  function cleanup() { if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop); }
+  backdrop.querySelector('[data-act="cancel"]').addEventListener("click", cleanup);
+  backdrop.addEventListener("click", function (e) { if (e.target === backdrop) cleanup(); });
+
+  const amtInput = backdrop.querySelector("#part-amount");
+  amtInput.value = remaining || "";
+
+  backdrop.querySelector('[data-act="ok"]').addEventListener("click", async function () {
+    const amount = Number(amtInput.value);
+    if (amtInput.value === "" || isNaN(amount) || amount <= 0) {
+      return showToast("Enter a valid amount.", "error");
+    }
+    const category = backdrop.querySelector("#part-cat").value;
+    const paymentMethod = backdrop.querySelector("#part-pay").value;
+    cleanup();
+
+    // Warn if paying this goes past what's left in the month.
+    const monthRemaining = monthCurrentBalance - monthSpent;
+    if (amount > monthRemaining) {
+      const ok = await showConfirm({
+        title: "Over your balance",
+        message: "Paying " + formatMoney(amount) + " is " + formatMoney(amount - monthRemaining) +
+          " more than what's left (" + formatMoney(monthRemaining) + "). Record it anyway?",
+        confirmText: "Record anyway",
+        danger: true
+      });
+      if (!ok) return;
+    }
+
+    // 1) Real expense in this month.
+    const expRef = await expensesRef.add({
+      name: p.name,
+      amount: amount,
+      type: "minus",
+      category: category,
+      paymentMethod: paymentMethod,
+      notes: "Part payment: " + monthName,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    // 2) Accumulate onto the plan, keep it open as "partial".
+    const payments = Array.isArray(p.payments) ? p.payments.slice() : [];
+    payments.push({ amount: amount, expenseId: expRef.id, category: category, paymentMethod: paymentMethod, paidAt: new Date() });
+    await plansRef.doc(id).update({
+      paid: paid + amount,
+      payments: payments,
+      status: "partial"
+    });
+
+    const left = Math.max(0, planned - (paid + amount));
+    showToast(formatMoney(amount) + " paid · " + formatMoney(left) + " left on " + p.name, "success", 3000);
+  });
+
+  document.body.appendChild(backdrop);
+  setTimeout(function () { amtInput.focus(); amtInput.select(); }, 50);
+}
+
 // ---- Undo a done plan → remove its expense, back to pending ----
 async function undoPlanRow(id) {
   const p = planById(id);
   if (!p) return;
+  // Closed from part-payments → reopen to partial, keep the payments/expenses.
+  if (Array.isArray(p.payments) && p.payments.length) {
+    await plansRef.doc(id).update({ status: "partial", actual: null });
+    showToast("Reopened — part payments kept.", "success", 3000);
+    return;
+  }
   if (p.pushedExpenseId) {
     await expensesRef.doc(p.pushedExpenseId).delete().catch(function () {});
   }
@@ -382,18 +538,26 @@ async function undoPlanRow(id) {
 async function deletePlanRow(id) {
   const p = planById(id);
   if (!p) return;
-  const wasDone = p.status === "done";
+  const payments = Array.isArray(p.payments) ? p.payments : [];
+  const expenseCount = payments.length + (p.pushedExpenseId ? 1 : 0);
   const ok = await showConfirm({
     title: 'Delete "' + p.name + '"?',
-    message: wasDone
-      ? "This also removes the expense it recorded in " + monthName + "."
+    message: expenseCount > 0
+      ? "This also removes the " +
+        (expenseCount > 1 ? expenseCount + " expenses" : "expense") +
+        " it recorded in " + monthName + "."
       : "This removes the plan.",
     confirmText: "Delete",
     danger: true
   });
   if (!ok) return;
 
-  if (wasDone && p.pushedExpenseId) {
+  for (let i = 0; i < payments.length; i++) {
+    if (payments[i].expenseId) {
+      await expensesRef.doc(payments[i].expenseId).delete().catch(function () {});
+    }
+  }
+  if (p.pushedExpenseId) {
     await expensesRef.doc(p.pushedExpenseId).delete().catch(function () {});
   }
   await plansRef.doc(id).delete();
@@ -404,11 +568,12 @@ async function deletePlanRow(id) {
 // ids: array of plan ids to move, or null for "all pending".
 async function transferPlans(ids) {
   // Resolve which plans to move (pending only — done never transfers).
+  const isMovable = function (p) { return p && p.status !== "done" && p.status !== "partial"; };
   let toMove;
   if (ids) {
-    toMove = ids.map(planById).filter(function (p) { return p && p.status !== "done"; });
+    toMove = ids.map(planById).filter(isMovable);
   } else {
-    toMove = currentPlans.filter(function (p) { return p.status !== "done"; });
+    toMove = currentPlans.filter(isMovable);
   }
   if (!toMove.length) {
     showToast("No pending plans to transfer.", "error");
@@ -472,6 +637,8 @@ async function transferPlans(ids) {
         category: p.category || PLAN_DEFAULT_CATEGORY,
         status: "pending",
         actual: null,
+        paid: 0,
+        payments: [],
         pushedExpenseId: null,
         transferredFrom: monthName,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()

@@ -116,27 +116,44 @@
       </button>
     </div>
 
-    <h2>Expenses</h2>
+    <div class="tab-toggle">
+      <button class="tab-btn active" id="tabbtn-expenses">🧾 Expenses</button>
+      <button class="tab-btn" id="tabbtn-saved">💾 Saved</button>
+    </div>
 
-    <div class="search-bar">
-      <div class="input-wrap" style="flex:1;">
-        <input type="text" id="search-input" placeholder="Search by name or notes...">
-        <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <div id="tab-expenses">
+      <div class="search-bar">
+        <div class="input-wrap" style="flex:1;">
+          <input type="text" id="search-input" placeholder="Search by name or notes...">
+          <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </div>
+        <div class="filter-chips">
+          <button class="filter-chip active" data-filter="all">All</button>
+          <button class="filter-chip" data-filter="minus">Spends</button>
+          <button class="filter-chip" data-filter="plus">Income</button>
+        </div>
       </div>
-      <div class="filter-chips">
-        <button class="filter-chip active" data-filter="all">All</button>
-        <button class="filter-chip" data-filter="minus">Spends</button>
-        <button class="filter-chip" data-filter="plus">Income</button>
+
+      <div class="card" style="padding: 8px 22px;">
+        <div id="expenses-list"></div>
+        <div id="empty-expenses" class="empty-state hidden">
+          <div class="empty-state-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </div>
+          <p>No expenses yet. Add one above.</p>
+        </div>
       </div>
     </div>
 
-    <div class="card" style="padding: 8px 22px;">
-      <div id="expenses-list"></div>
-      <div id="empty-expenses" class="empty-state hidden">
-        <div class="empty-state-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+    <div id="tab-saved" class="hidden">
+      <div class="card" style="padding: 8px 22px;">
+        <div id="saved-calcs-list"></div>
+        <div id="empty-saved" class="empty-state">
+          <div class="empty-state-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v8"/><path d="M8 12h8"/><circle cx="12" cy="12" r="10"/></svg>
+          </div>
+          <p>No saved calculations yet. Long-press an expense, tick a few, then tap Save.</p>
         </div>
-        <p>No expenses yet. Add one above.</p>
       </div>
     </div>
 
@@ -195,6 +212,52 @@
     </div>
   </div>
 
+  <!-- CALCULATOR MODAL (long-press an expense row) -->
+  <div class="modal-backdrop hidden" id="calc-modal">
+    <div class="modal-card calc-card">
+      <h3 id="calc-title">Calculator</h3>
+      <div class="calc-display">
+        <div class="calc-expr" id="calc-expr"></div>
+        <div class="calc-result" id="calc-result">0</div>
+      </div>
+      <div class="calc-keys">
+        <button class="calc-key fn" data-calc="clear">C</button>
+        <button class="calc-key fn" data-calc="back">⌫</button>
+        <button class="calc-key op" data-calc="/">÷</button>
+        <button class="calc-key op" data-calc="*">×</button>
+
+        <button class="calc-key" data-calc="7">7</button>
+        <button class="calc-key" data-calc="8">8</button>
+        <button class="calc-key" data-calc="9">9</button>
+        <button class="calc-key op" data-calc="-">−</button>
+
+        <button class="calc-key" data-calc="4">4</button>
+        <button class="calc-key" data-calc="5">5</button>
+        <button class="calc-key" data-calc="6">6</button>
+        <button class="calc-key op" data-calc="+">+</button>
+
+        <button class="calc-key" data-calc="1">1</button>
+        <button class="calc-key" data-calc="2">2</button>
+        <button class="calc-key" data-calc="3">3</button>
+        <button class="calc-key eq" data-calc="=">=</button>
+
+        <button class="calc-key zero" data-calc="0">0</button>
+        <button class="calc-key" data-calc=".">.</button>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="calc-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SELECT BAR (appears in long-press multi-select mode) -->
+  <div class="select-bar hidden" id="select-bar">
+    <button class="select-cancel" id="select-cancel" title="Cancel selection">✕</button>
+    <span class="select-count" id="select-count">0 selected</span>
+    <button class="select-save" id="select-save" title="Save selection">💾 <span>Save</span></button>
+    <button class="select-calc-fab" id="select-calc" title="Calculate total">🧮 <span>Total</span></button>
+  </div>
+
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
@@ -234,6 +297,21 @@
     document.getElementById("details-modal").addEventListener("click", function (e) {
       if (e.target.id === "details-modal") closeDetailsModal();
     });
+
+    document.getElementById("calc-close").addEventListener("click", closeCalcModal);
+    document.getElementById("calc-modal").addEventListener("click", function (e) {
+      if (e.target.id === "calc-modal") closeCalcModal();
+    });
+    document.querySelectorAll("#calc-modal .calc-key").forEach(function (btn) {
+      btn.addEventListener("click", function () { calcInput(btn.dataset.calc); });
+    });
+
+    document.getElementById("select-cancel").addEventListener("click", exitSelectMode);
+    document.getElementById("select-calc").addEventListener("click", openCalcFromSelection);
+    document.getElementById("select-save").addEventListener("click", saveSelection);
+
+    document.getElementById("tabbtn-expenses").addEventListener("click", function () { switchMonthTab("expenses"); });
+    document.getElementById("tabbtn-saved").addEventListener("click", function () { switchMonthTab("saved"); });
 
     document.getElementById("search-input").addEventListener("input", function (e) {
       searchTerm = e.target.value.toLowerCase();

@@ -826,6 +826,142 @@ button svg { width: 18px; height: 18px; flex-shrink: 0; }
 }
 .modal-actions button { flex: 1; }
 
+/* Long-press calculator */
+.calc-card { max-width: 360px; }
+.calc-display {
+  background: var(--chip-bg);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  text-align: right;
+}
+.calc-expr   { font-size: 0.85rem; color: var(--text-muted); min-height: 1.1em; }
+.calc-result { font-size: 2rem; font-weight: 700; word-break: break-all; }
+
+.calc-keys {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.calc-key {
+  padding: 16px 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  border-radius: 10px;
+  background: var(--chip-bg);
+  color: var(--text);
+  cursor: pointer;
+  transition: filter 0.12s ease;
+}
+.calc-key:hover  { filter: brightness(1.15); }
+.calc-key:active { filter: brightness(0.9); }
+.calc-key.op   { color: var(--success); }
+.calc-key.fn   { color: var(--text-muted); }
+.calc-key.eq   { background: var(--success); color: #fff; grid-row: span 2; }
+.calc-key.zero { grid-column: span 2; }
+
+/* Long-press multi-select */
+.row-check { display: none; }
+#expenses-list.select-mode .row-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 2px solid var(--text-muted);
+  font-size: 0.85rem;
+}
+#expenses-list.select-mode .expense-row { cursor: pointer; }
+#expenses-list.select-mode .expense-row .row-actions { display: none; }
+.expense-row.selected {
+  background: rgba(16, 185, 129, 0.12);
+  border-radius: 12px;
+}
+.expense-row.selected .row-check { border-color: var(--success); }
+
+.select-bar {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--card-bg);
+  border-radius: 999px;
+  padding: 8px 8px 8px 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  z-index: 60;
+  animation: slideUp 0.3s ease-out;
+}
+.select-count { font-weight: 600; font-size: 0.9rem; white-space: nowrap; }
+.select-cancel {
+  background: var(--chip-bg);
+  color: var(--text-muted);
+  border: none;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  font-size: 1rem;
+}
+.select-save {
+  background: var(--chip-bg);
+  color: var(--text);
+  border: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.select-save:hover { filter: brightness(1.07); }
+.select-calc-fab {
+  background: var(--primary-grad);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.select-calc-fab:hover { filter: brightness(1.07); }
+
+/* Saved calculations tab */
+.saved-calc {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.saved-calc:last-child { border-bottom: none; }
+.saved-calc-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.saved-calc-meta { flex: 1; min-width: 0; }
+.saved-calc-name { font-weight: 700; word-break: break-word; }
+.saved-calc-date { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }
+.saved-calc-total { font-size: 1.2rem; font-weight: 800; white-space: nowrap; }
+.saved-calc-items { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.saved-calc-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+.saved-calc-item .plus  { color: var(--success); font-weight: 600; }
+.saved-calc-item .minus { color: var(--danger);  font-weight: 600; }
+.saved-calc-del { flex: 0 0 auto; }
+
 /* Type segment (Spend / Income) */
 .type-segment {
   display: flex;
@@ -1978,6 +2114,15 @@ a:not([class]):hover { text-decoration: underline; }
   font-weight: 700;
   color: var(--text-muted);
   background: var(--chip-bg);
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.plan-partial-chip {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.16);
   padding: 4px 10px;
   border-radius: 999px;
   white-space: nowrap;
