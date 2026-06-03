@@ -49,6 +49,9 @@ let selectedIds = new Set();
 let savedCalcsRef = null;
 let currentSavedCalcs = [];
 
+// Plans subcollection (months only) — used by "Add to plan" from select mode
+let monthPlansRef = null;
+
 // State for forms
 let selectedCategory = DEFAULT_CATEGORY;
 let editing = null; // { id, type, category }
@@ -155,6 +158,12 @@ async function loadMonth() {
     });
     renderSavedCalcs();
   });
+
+  monthPlansRef = itemDoc.ref.collection("plans");
+  if (trackerType === "budget") {
+    const pb = document.getElementById("select-plan");
+    if (pb) pb.style.display = "none"; // budgets have no plans
+  }
 }
 
 // Edit the month's current balance (cash on hand). Updates the doc + total live.
@@ -604,6 +613,224 @@ function openCalcFromSelection() {
   document.getElementById("calc-modal").classList.remove("hidden");
 }
 
+// --- Add selected expenses to an existing plan ----------------------
+function addSelectionToPlan() {
+  if (selectedIds.size === 0) return;
+  // Only spends count toward a plan payment.
+  const spends = [];
+  let skippedIncome = 0;
+  selectedIds.forEach(function (id) {
+    const e = currentExpenses.find(function (x) { return x.id === id; });
+    if (!e) return;
+    if (e.type === "minus") {
+      spends.push({ id: e.id, name: e.name, amount: e.amount, category: e.category, paymentMethod: e.paymentMethod });
+    } else {
+      skippedIncome++;
+    }
+  });
+  if (spends.length === 0) {
+    return showToast(
+      skippedIncome > 0
+        ? "Only spends can be added to a plan — your selection is all income."
+        : "Select one or more spends to add to a plan.",
+      "error", 3500);
+  }
+  openAddToPlanModal(spends, skippedIncome, exitSelectMode);
+}
+
+// Shared "Add to plan" flow. `spends` = [{ amount, name, [id], [category], [paymentMethod] }].
+async function openAddToPlanModal(spends, skippedIncome, onSuccess) {
+  if (!monthPlansRef || !spends || !spends.length) return;
+  const total = spends.reduce(function (s, e) { return s + e.amount; }, 0);
+
+  // This month's open plans only.
+  let plans;
+  try {
+    const snap = await monthPlansRef.orderBy("createdAt", "asc").get();
+    plans = snap.docs
+      .map(function (d) { return Object.assign({ id: d.id }, d.data()); })
+      .filter(function (p) { return p.status !== "done"; });
+  } catch (e) {
+    return showToast("Couldn't load plans.", "error");
+  }
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  const card = document.createElement("div");
+  card.className = "modal-card";
+  backdrop.appendChild(card);
+
+  function cleanup() { if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop); }
+  backdrop.addEventListener("click", function (e) { if (e.target === backdrop) cleanup(); });
+
+  // Append this selection's spends as plan payments onto `existing`.
+  function buildPayments(existing) {
+    const payments = Array.isArray(existing) ? existing.slice() : [];
+    spends.forEach(function (s) {
+      const entry = {
+        amount: s.amount,
+        category: s.category || "other",
+        paymentMethod: s.paymentMethod || "other",
+        paidAt: new Date(),
+        linked: true
+      };
+      if (s.id) entry.expenseId = s.id;
+      payments.push(entry);
+    });
+    return payments;
+  }
+
+  function renderPick() {
+    const rows = plans.map(function (p) {
+      const planned = Number(p.planned) || 0;
+      const paid = Number(p.paid) || 0;
+      const remaining = Math.max(0, planned - paid);
+      const newPaid = paid + total;
+      const newRemaining = Math.max(0, planned - newPaid);
+      return '<button class="plan-pick-row" data-plan="' + p.id + '">' +
+          '<span class="plan-pick-name">' + escapeHtml(p.name) + ' · ' + formatMoney(planned) + ' planned</span>' +
+          '<span class="plan-pick-amt">Now: ' + formatMoney(paid) + ' paid · ' + formatMoney(remaining) + ' left</span>' +
+          '<span class="plan-pick-after">After +' + formatMoney(total) + ': ' +
+            formatMoney(newPaid) + ' paid · ' + formatMoney(newRemaining) + ' left</span>' +
+        '</button>';
+    }).join("");
+    const emptyNote = plans.length ? '' :
+      '<p class="muted" style="font-size:0.85rem;margin:0 0 14px;">No open plans yet — create one below.</p>';
+    card.innerHTML =
+      '<h3>Add to a plan</h3>' +
+      '<p class="muted" style="margin:-6px 0 14px;font-size:0.88rem;">Adding <strong>' +
+        formatMoney(total) + '</strong> from ' + spends.length + ' spend' + (spends.length > 1 ? "s" : "") + '</p>' +
+      emptyNote +
+      '<div class="plan-pick-list">' + rows + '</div>' +
+      '<button class="plan-pick-new" data-act="new">＋ Create new plan</button>' +
+      '<div class="modal-actions"><button class="btn-secondary" data-act="cancel">Cancel</button></div>';
+    card.querySelector('[data-act="cancel"]').addEventListener("click", cleanup);
+    card.querySelector('[data-act="new"]').addEventListener("click", renderNewPlan);
+    card.querySelectorAll("[data-plan]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        const plan = plans.find(function (p) { return p.id === b.dataset.plan; });
+        if (plan) renderSummary(plan);
+      });
+    });
+  }
+
+  function renderNewPlan() {
+    let catOptions = "";
+    CATEGORY_KEYS.forEach(function (k) {
+      const c = CATEGORIES[k];
+      catOptions += '<option value="' + k + '"' + (k === DEFAULT_CATEGORY ? " selected" : "") +
+        '>' + c.emoji + " " + c.label + '</option>';
+    });
+    card.innerHTML =
+      '<h3>New plan</h3>' +
+      '<div class="add-expense-form">' +
+        '<div class="form-group"><label for="np-name">Name</label>' +
+          '<input type="text" id="np-name" placeholder="e.g. Grocery"></div>' +
+        '<div class="form-group"><label for="np-amount">Planned amount (₹)</label>' +
+          '<input type="number" id="np-amount" min="0" placeholder="e.g. 3000"></div>' +
+        '<div class="form-group"><label for="np-cat">Category</label>' +
+          '<select id="np-cat" class="plan-select">' + catOptions + '</select></div>' +
+      '</div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn-secondary" data-act="back">Back</button>' +
+        '<button class="btn-primary" data-act="create">Create & continue</button>' +
+      '</div>';
+    const nameInput = card.querySelector("#np-name");
+    const amtInput = card.querySelector("#np-amount");
+    amtInput.value = total; // sensible default: at least what you're adding
+    card.querySelector('[data-act="back"]').addEventListener("click", renderPick);
+    card.querySelector('[data-act="create"]').addEventListener("click", async function () {
+      const name = nameInput.value.trim();
+      const planned = Number(amtInput.value);
+      if (!name) return showToast("Enter a plan name.", "error");
+      if (!planned || planned <= 0) return showToast("Enter a valid planned amount.", "error");
+      const category = card.querySelector("#np-cat").value;
+      // Create the plan with this selection already recorded as its first payment.
+      const payments = buildPayments([]);
+      await monthPlansRef.add({
+        name: name,
+        planned: planned,
+        category: category,
+        status: "partial",
+        actual: null,
+        paid: total,
+        payments: payments,
+        pushedExpenseId: null,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      showToast(formatMoney(total) + " added to " + name, "success", 3000);
+      renderResult({ name: name, planned: planned, paid: total });
+    });
+    setTimeout(function () { nameInput.focus(); }, 50);
+  }
+
+  // Read-only summary shown after a brand-new plan is created (payment applied).
+  function renderResult(plan) {
+    const planned = Number(plan.planned) || 0;
+    const paid = Number(plan.paid) || 0;
+    const remaining = Math.max(0, planned - paid);
+    card.innerHTML =
+      '<h3>' + escapeHtml(plan.name) + ' created</h3>' +
+      '<div class="details-row"><div class="details-label">Planned</div><div class="details-value">' + formatMoney(planned) + '</div></div>' +
+      '<div class="details-row"><div class="details-label">Already paid</div><div class="details-value"><strong>' + formatMoney(paid) + '</strong></div></div>' +
+      '<div class="details-row"><div class="details-label">Remaining</div><div class="details-value">' + formatMoney(remaining) + '</div></div>' +
+      '<div class="modal-actions"><button class="btn-primary" data-act="done">Done</button></div>';
+    card.querySelector('[data-act="done"]').addEventListener("click", function () {
+      cleanup();
+      if (typeof onSuccess === "function") onSuccess();
+    });
+  }
+
+  function renderSummary(plan) {
+    const planned = Number(plan.planned) || 0;
+    const paid = Number(plan.paid) || 0;
+    const newPaid = paid + total;
+    const remaining = Math.max(0, planned - newPaid);
+    const skipNote = skippedIncome > 0
+      ? '<p class="muted" style="font-size:0.8rem;margin-top:10px;">' + skippedIncome +
+        ' income item' + (skippedIncome > 1 ? "s" : "") + ' skipped (only spends are added).</p>'
+      : '';
+    card.innerHTML =
+      '<h3>' + escapeHtml(plan.name) + '</h3>' +
+      '<div class="details-row"><div class="details-label">Planned</div><div class="details-value">' + formatMoney(planned) + '</div></div>' +
+      '<div class="details-row"><div class="details-label">Already paid</div><div class="details-value">' + formatMoney(paid) + '</div></div>' +
+      '<div class="details-row"><div class="details-label">Adding</div><div class="details-value">' + formatMoney(total) + ' (' + spends.length + ' item' + (spends.length > 1 ? "s" : "") + ')</div></div>' +
+      '<div class="details-row"><div class="details-label">New paid</div><div class="details-value"><strong>' + formatMoney(newPaid) + '</strong></div></div>' +
+      '<div class="details-row"><div class="details-label">Remaining</div><div class="details-value">' + formatMoney(remaining) + '</div></div>' +
+      skipNote +
+      '<div class="modal-actions">' +
+        '<button class="btn-secondary" data-act="back">Back</button>' +
+        '<button class="btn-primary" data-act="confirm">Add to plan</button>' +
+      '</div>';
+    card.querySelector('[data-act="back"]').addEventListener("click", renderPick);
+    card.querySelector('[data-act="confirm"]').addEventListener("click", async function () {
+      cleanup();
+      const payments = Array.isArray(plan.payments) ? plan.payments.slice() : [];
+      spends.forEach(function (s) {
+        const entry = {
+          amount: s.amount,
+          category: s.category || "other",
+          paymentMethod: s.paymentMethod || "other",
+          paidAt: new Date(),
+          linked: true
+        };
+        if (s.id) entry.expenseId = s.id;
+        payments.push(entry);
+      });
+      await monthPlansRef.doc(plan.id).update({
+        paid: (Number(plan.paid) || 0) + total,
+        payments: payments,
+        status: "partial"
+      });
+      showToast(formatMoney(total) + " added to " + plan.name, "success", 3000);
+      if (typeof onSuccess === "function") onSuccess();
+    });
+  }
+
+  renderPick();
+  document.body.appendChild(backdrop);
+}
+
 // --- Saved calculations ---------------------------------------------
 async function saveSelection() {
   if (!savedCalcsRef || selectedIds.size === 0) return;
@@ -696,6 +923,25 @@ function buildSavedCalcCard(c) {
     }
   });
   card.querySelector(".saved-calc-head").appendChild(del);
+
+  // "Add to plan" — apply this calc's spends to a plan (months only).
+  const spendItems = items.filter(function (it) { return it.type !== "plus"; });
+  if (trackerType !== "budget" && spendItems.length > 0) {
+    const footer = document.createElement("div");
+    footer.className = "saved-calc-actions";
+    const addBtn = document.createElement("button");
+    addBtn.className = "plan-mini-btn primary";
+    addBtn.textContent = "📋 Add to plan";
+    addBtn.addEventListener("click", function () {
+      const spends = spendItems.map(function (it) {
+        return { name: it.name, amount: it.amount };
+      });
+      const skippedIncome = items.length - spendItems.length;
+      openAddToPlanModal(spends, skippedIncome, null);
+    });
+    footer.appendChild(addBtn);
+    card.appendChild(footer);
+  }
 
   return card;
 }

@@ -539,7 +539,10 @@ async function deletePlanRow(id) {
   const p = planById(id);
   if (!p) return;
   const payments = Array.isArray(p.payments) ? p.payments : [];
-  const expenseCount = payments.length + (p.pushedExpenseId ? 1 : 0);
+  // Linked payments point at pre-existing expenses (added via "Add to plan") —
+  // those belong to the month, so deleting the plan must NOT remove them.
+  const toRemove = payments.filter(function (pay) { return pay.expenseId && !pay.linked; });
+  const expenseCount = toRemove.length + (p.pushedExpenseId ? 1 : 0);
   const ok = await showConfirm({
     title: 'Delete "' + p.name + '"?',
     message: expenseCount > 0
@@ -552,10 +555,8 @@ async function deletePlanRow(id) {
   });
   if (!ok) return;
 
-  for (let i = 0; i < payments.length; i++) {
-    if (payments[i].expenseId) {
-      await expensesRef.doc(payments[i].expenseId).delete().catch(function () {});
-    }
+  for (let i = 0; i < toRemove.length; i++) {
+    await expensesRef.doc(toRemove[i].expenseId).delete().catch(function () {});
   }
   if (p.pushedExpenseId) {
     await expensesRef.doc(p.pushedExpenseId).delete().catch(function () {});

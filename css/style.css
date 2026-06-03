@@ -921,6 +921,19 @@ button svg { width: 18px; height: 18px; flex-shrink: 0; }
   gap: 6px;
 }
 .select-save:hover { filter: brightness(1.07); }
+.select-plan {
+  background: var(--chip-bg);
+  color: var(--text);
+  border: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.select-plan:hover { filter: brightness(1.07); }
 .select-calc-fab {
   background: var(--primary-grad);
   color: #fff;
@@ -934,6 +947,52 @@ button svg { width: 18px; height: 18px; flex-shrink: 0; }
   gap: 6px;
 }
 .select-calc-fab:hover { filter: brightness(1.07); }
+
+/* Keep the select bar from overflowing on phones — show icons only. */
+@media (max-width: 480px) {
+  .select-plan span,
+  .select-save span,
+  .select-calc-fab span { display: none; }
+}
+
+/* "Add to plan" picker (from monthly select mode) */
+.plan-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.plan-pick-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  width: 100%;
+  background: var(--chip-bg);
+  border: none;
+  border-radius: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+.plan-pick-row:hover { filter: brightness(1.07); }
+.plan-pick-name { font-weight: 700; }
+.plan-pick-amt { font-size: 0.82rem; color: var(--text-muted); }
+.plan-pick-after { font-size: 0.82rem; font-weight: 700; color: var(--primary); }
+.plan-pick-new {
+  width: 100%;
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--primary);
+  border-radius: 12px;
+  padding: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+.plan-pick-new:hover { border-color: var(--primary); }
+.saved-calc-actions { margin-top: 12px; }
 
 /* Saved calculations tab */
 .saved-calc {

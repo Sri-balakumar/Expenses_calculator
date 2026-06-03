@@ -254,6 +254,7 @@
   <div class="select-bar hidden" id="select-bar">
     <button class="select-cancel" id="select-cancel" title="Cancel selection">✕</button>
     <span class="select-count" id="select-count">0 selected</span>
+    <button class="select-plan" id="select-plan" title="Add to a plan">📋 <span>Add to plan</span></button>
     <button class="select-save" id="select-save" title="Save selection">💾 <span>Save</span></button>
     <button class="select-calc-fab" id="select-calc" title="Calculate total">🧮 <span>Total</span></button>
   </div>
@@ -309,6 +310,7 @@
     document.getElementById("select-cancel").addEventListener("click", exitSelectMode);
     document.getElementById("select-calc").addEventListener("click", openCalcFromSelection);
     document.getElementById("select-save").addEventListener("click", saveSelection);
+    document.getElementById("select-plan").addEventListener("click", addSelectionToPlan);
 
     document.getElementById("tabbtn-expenses").addEventListener("click", function () { switchMonthTab("expenses"); });
     document.getElementById("tabbtn-saved").addEventListener("click", function () { switchMonthTab("saved"); });
