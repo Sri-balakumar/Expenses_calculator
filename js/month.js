@@ -745,40 +745,10 @@ async function openAddToPlanModal(spends, skippedIncome, onSuccess) {
       if (!name) return showToast("Enter a plan name.", "error");
       if (!planned || planned <= 0) return showToast("Enter a valid planned amount.", "error");
       const category = card.querySelector("#np-cat").value;
-      // Create the plan with this selection already recorded as its first payment.
-      const payments = buildPayments([]);
-      await monthPlansRef.add({
-        name: name,
-        planned: planned,
-        category: category,
-        status: "partial",
-        actual: null,
-        paid: total,
-        payments: payments,
-        pushedExpenseId: null,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      showToast(formatMoney(total) + " added to " + name, "success", 3000);
-      renderResult({ name: name, planned: planned, paid: total });
+      // Don't write yet — carry the details into the summary; commit on confirm.
+      renderSummary({ isNew: true, name: name, planned: planned, category: category, paid: 0, payments: [] });
     });
     setTimeout(function () { nameInput.focus(); }, 50);
-  }
-
-  // Read-only summary shown after a brand-new plan is created (payment applied).
-  function renderResult(plan) {
-    const planned = Number(plan.planned) || 0;
-    const paid = Number(plan.paid) || 0;
-    const remaining = Math.max(0, planned - paid);
-    card.innerHTML =
-      '<h3>' + escapeHtml(plan.name) + ' created</h3>' +
-      '<div class="details-row"><div class="details-label">Planned</div><div class="details-value">' + formatMoney(planned) + '</div></div>' +
-      '<div class="details-row"><div class="details-label">Already paid</div><div class="details-value"><strong>' + formatMoney(paid) + '</strong></div></div>' +
-      '<div class="details-row"><div class="details-label">Remaining</div><div class="details-value">' + formatMoney(remaining) + '</div></div>' +
-      '<div class="modal-actions"><button class="btn-primary" data-act="done">Done</button></div>';
-    card.querySelector('[data-act="done"]').addEventListener("click", function () {
-      cleanup();
-      if (typeof onSuccess === "function") onSuccess();
-    });
   }
 
   function renderSummary(plan) {
@@ -802,26 +772,30 @@ async function openAddToPlanModal(spends, skippedIncome, onSuccess) {
         '<button class="btn-secondary" data-act="back">Back</button>' +
         '<button class="btn-primary" data-act="confirm">Add to plan</button>' +
       '</div>';
-    card.querySelector('[data-act="back"]').addEventListener("click", renderPick);
+    // New plans: go Back to the create form. Existing: back to the picker.
+    card.querySelector('[data-act="back"]').addEventListener("click", plan.isNew ? renderNewPlan : renderPick);
     card.querySelector('[data-act="confirm"]').addEventListener("click", async function () {
       cleanup();
-      const payments = Array.isArray(plan.payments) ? plan.payments.slice() : [];
-      spends.forEach(function (s) {
-        const entry = {
-          amount: s.amount,
-          category: s.category || "other",
-          paymentMethod: s.paymentMethod || "other",
-          paidAt: new Date(),
-          linked: true
-        };
-        if (s.id) entry.expenseId = s.id;
-        payments.push(entry);
-      });
-      await monthPlansRef.doc(plan.id).update({
-        paid: (Number(plan.paid) || 0) + total,
-        payments: payments,
-        status: "partial"
-      });
+      if (plan.isNew) {
+        // Create the plan now, with this selection as its first payment.
+        await monthPlansRef.add({
+          name: plan.name,
+          planned: plan.planned,
+          category: plan.category || DEFAULT_CATEGORY,
+          status: "partial",
+          actual: null,
+          paid: total,
+          payments: buildPayments([]),
+          pushedExpenseId: null,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      } else {
+        await monthPlansRef.doc(plan.id).update({
+          paid: (Number(plan.paid) || 0) + total,
+          payments: buildPayments(plan.payments),
+          status: "partial"
+        });
+      }
       showToast(formatMoney(total) + " added to " + plan.name, "success", 3000);
       if (typeof onSuccess === "function") onSuccess();
     });
