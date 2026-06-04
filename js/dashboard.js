@@ -93,16 +93,19 @@ async function fetchMonthsData() {
   monthsSnap.docs.forEach(function (monthDoc, idx) {
     const month = monthDoc.data();
     const currentBalance = Number(month.currentBalance) || 0;
-    let spent = 0;
+    let spent = 0;   // expenses only (minus entries)
+    let income = 0;  // income only (plus entries)
     const byCategory = {};
     monthExpenseSnaps[idx].forEach(function (expDoc) {
       const exp = expDoc.data();
       const amt = Number(exp.amount) || 0;
       const isMinus = exp.type !== "plus";
-      spent += isMinus ? amt : -amt;
       if (isMinus) {
+        spent += amt;
         const c = exp.category || "other";
         byCategory[c] = (byCategory[c] || 0) + amt;
+      } else {
+        income += amt;
       }
     });
 
@@ -111,8 +114,8 @@ async function fetchMonthsData() {
       name: month.name,
       spent: spent,
       currentBalance: currentBalance,
-      totalRemaining: currentBalance - spent,
-      remaining: userSalary - spent,
+      totalRemaining: currentBalance - spent + income,
+      remaining: userSalary - spent + income,
       byCategory: byCategory
     });
   });

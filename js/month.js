@@ -33,7 +33,8 @@ let userId = null;
 let userName = "";
 let userSalary = 0;       // for type=month, this is the user's salary; for type=budget, this is the budget amount
 let monthCurrentBalance = 0; // cash on hand entered at month creation (months only)
-let monthSpent = 0;       // latest computed spend, so the total can be recomputed after edits
+let monthSpent = 0;       // latest computed spend (expenses only), so the total can be recomputed after edits
+let monthIncome = 0;      // latest computed income (plus entries), so the total can be recomputed after edits
 let monthId = null;
 let monthName = "";
 let trackerType = "month"; // "month" or "budget"
@@ -201,7 +202,7 @@ function editCurrentBalance() {
     await db.collection("users").doc(userId)
       .collection("months").doc(monthId)
       .update({ currentBalance: val });
-    updateTotal(monthSpent); // refresh the header with the new balance
+    updateTotal(monthSpent, monthIncome); // refresh the header with the new balance
     showToast("Current balance updated.", "success");
   });
 
@@ -266,7 +267,8 @@ function renderExpenses(snap) {
   listEl.innerHTML = "";
   currentExpenses = [];
 
-  let spent = 0;
+  let spent = 0;   // expenses only (minus entries)
+  let income = 0;  // income only (plus entries)
   const seenIds = new Set();
   const sorted = []; // chronological for week grouping (oldest first)
 
@@ -274,7 +276,8 @@ function renderExpenses(snap) {
     const exp = expDoc.data();
     const amt = Number(exp.amount) || 0;
     const category = exp.category || DEFAULT_CATEGORY;
-    spent += exp.type === "plus" ? -amt : amt;
+    if (exp.type === "plus") income += amt;
+    else spent += amt;
 
     const obj = {
       id: expDoc.id,
@@ -307,7 +310,7 @@ function renderExpenses(snap) {
   }
 
   knownExpenseIds = seenIds;
-  updateTotal(spent);
+  updateTotal(spent, income);
 }
 
 function applyFilters() {
@@ -1066,16 +1069,17 @@ async function renderCategoryBudgets(expenses) {
   }
 }
 
-function updateTotal(spent) {
+function updateTotal(spent, income) {
   monthSpent = spent; // remember so edits to current balance can recompute
+  monthIncome = income || 0; // income (plus entries) tracked separately from spent
   const totalEl = document.getElementById("total-display");
   const amountEl = document.getElementById("total-amount");
   const labelEl = document.getElementById("total-label");
   const breakdownEl = document.getElementById("total-breakdown");
 
   if (trackerType === "budget") {
-    // Budgets: single figure (amount − spent), no breakdown.
-    const remaining = userSalary - spent;
+    // Budgets: single figure (amount − spent + income), no breakdown.
+    const remaining = userSalary - spent + monthIncome;
     if (breakdownEl) breakdownEl.classList.add("hidden");
     labelEl.textContent = remaining >= 0 ? "Remaining" : "Over budget by";
     animateCount(amountEl, Math.abs(remaining), formatMoney);
@@ -1084,9 +1088,10 @@ function updateTotal(spent) {
     return;
   }
 
-  // Months: the current balance already includes salary, so the total is simply
-  // current balance − spent. Breakdown shows Current balance and Spent.
-  const totalRemaining = monthCurrentBalance - spent;
+  // Months: the current balance already includes salary, so the total is
+  // current balance − spent + income. Breakdown shows Current balance and Spent
+  // (expenses only, never income — so Spent never goes negative).
+  const totalRemaining = monthCurrentBalance - spent + monthIncome;
   labelEl.textContent = totalRemaining >= 0 ? "Total remaining" : "Over budget by";
   animateCount(amountEl, Math.abs(totalRemaining), formatMoney);
 
